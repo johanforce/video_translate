@@ -140,6 +140,7 @@ class GeminiServiceTests(unittest.TestCase):
             paths.context_json.write_text(
                 json.dumps(
                     {
+                        "is_complete": True,
                         "profile": {
                             "film_profile": {"genre": "Drama"},
                             "characters": [],
