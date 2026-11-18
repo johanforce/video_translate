@@ -89,8 +89,8 @@ class GeminiJsonClient:
         cleaned = text.strip()
         fence = chr(96) * 3
         if cleaned.startswith(fence):
-            cleaned = re.sub(r"^" + re.escape(fence) + r"(?:json)?\\s*", "", cleaned, flags=re.IGNORECASE)
-            cleaned = re.sub(r"\\s*" + re.escape(fence) + r"$", "", cleaned)
+            cleaned = re.sub(r"^" + re.escape(fence) + r"(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+            cleaned = re.sub(r"\s*" + re.escape(fence) + r"$", "", cleaned)
         try:
             value = json.loads(cleaned)
         except json.JSONDecodeError as exc:
@@ -124,7 +124,7 @@ class GeminiJsonClient:
         path = Path(debug_path)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(response_text, encoding="utf-8", newline="\\n")
+            path.write_text(response_text, encoding="utf-8", newline="\n")
         except OSError as exc:
             return f"Không lưu được phản hồi gốc ({path}): {exc}"
         return f"Phản hồi Gemini gốc đã lưu: {path}"
