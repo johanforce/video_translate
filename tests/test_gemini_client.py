@@ -1,4 +1,7 @@
+import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 
 from video_translator.gemini.client import GeminiClientError, GeminiJsonClient
 from video_translator.gemini.prompt_loader import render_prompt
@@ -19,6 +22,39 @@ class GeminiClientTests(unittest.TestCase):
     def test_rejects_non_object_json(self) -> None:
         with self.assertRaises(GeminiClientError):
             GeminiJsonClient._parse_json("[]")
+
+    def test_invalid_response_is_saved_with_finish_reason(self) -> None:
+        raw_response = '{"characters": [\n  {"name": "A"}'
+        response = SimpleNamespace(
+            text=raw_response,
+            candidates=[SimpleNamespace(finish_reason="MAX_TOKENS")],
+            usage_metadata=SimpleNamespace(total_token_count=8192),
+        )
+
+        class FakeModels:
+            def generate_content(self, **kwargs):
+                return response
+
+        client = GeminiJsonClient.__new__(GeminiJsonClient)
+        client.model = "test-model"
+        client._types = SimpleNamespace(GenerateContentConfig=lambda **kwargs: kwargs)
+        client._client = SimpleNamespace(models=FakeModels())
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            debug_path = Path(temp_dir) / "chapter-03.raw.txt"
+            with self.assertRaisesRegex(
+                GeminiClientError,
+                "finish_reason=MAX_TOKENS",
+            ) as raised:
+                client.generate_json(
+                    "prompt",
+                    "system",
+                    debug_path=debug_path,
+                )
+
+            self.assertIn("dòng 2", str(raised.exception))
+            self.assertIn(str(debug_path), str(raised.exception))
+            self.assertEqual(debug_path.read_text(encoding="utf-8"), raw_response)
 
     def test_prompt_replaces_only_named_tokens(self) -> None:
         template = '{"data": {{DATA}}, "literal": "{not-a-token}"}'
