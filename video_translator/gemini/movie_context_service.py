@@ -77,6 +77,10 @@ class MovieContextService:
             raise MovieContextError(f"Không tìm thấy transcript: {paths.transcript_json}")
 
         transcript = read_json(paths.transcript_json)
+        if transcript.get("is_complete") is False:
+            raise MovieContextError(
+                "Whisper transcript còn dang dở. Hãy tiếp tục nhận diện các chunk còn thiếu trước."
+            )
         segments = transcript.get("segments")
         if not isinstance(segments, list) or not segments:
             raise MovieContextError("Transcript không có danh sách segments hợp lệ.")
