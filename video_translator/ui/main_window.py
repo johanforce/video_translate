@@ -283,8 +283,8 @@ class MainWindow(QMainWindow):
         layout.addLayout(buttons)
 
         hint = QLabel(
-            "Whisper tạo transcript gốc có timestamp. Chọn lại transcript cũ để khôi phục "
-            "project và tiếp tục từ các checkpoint đã lưu."
+            "Whisper tạo transcript gốc có timestamp. Khi chọn lại video nguồn, ứng dụng "
+            "tự tìm project đã lưu và tiếp tục checkpoint; cũng có thể mở transcript JSON thủ công."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #9CA3AF;")
@@ -344,8 +344,8 @@ class MainWindow(QMainWindow):
 
         hint = QLabel(
             "Checkpoint theo chapter và batch. Khi Gemini lỗi hoặc ứng dụng bị tắt, "
-            "chạy lại cùng project sẽ dùng phần đã lưu; bản dịch đã trả về được lưu "
-            "ngay trước bước QC để tránh gọi lại không cần thiết."
+            "chạy lại cùng project sẽ dùng phần đã lưu. Đổi Gemini model không xóa kết quả "
+            "đã hoàn tất; model mới chỉ xử lý các phần còn dang dở."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #9CA3AF;")
