@@ -42,6 +42,7 @@ class MainWindow(QMainWindow):
         ) = None
         self.voice_worker: VoiceListWorker | None = None
         self.context_path: Path | None = None
+        self._context_ready = False
         self._busy = False
         self.setWindowTitle("VideoTranslator — Vietnamese Film Dubbing")
         self.resize(1040, 900)
@@ -655,6 +656,7 @@ class MainWindow(QMainWindow):
 
     def _on_context_success(self, context_path: str) -> None:
         self.context_path = Path(context_path)
+        self._context_ready = True
         self.context_status.setText(f"Context Profile: {context_path}")
         self.status_label.setText("Phân tích ngữ cảnh phim hoàn tất.")
         self._append_log(f"Context Profile: {context_path}")
@@ -687,6 +689,7 @@ class MainWindow(QMainWindow):
         if selected_index >= 0:
             self.voice_combo.setCurrentIndex(selected_index)
         self._append_log(f"Đã tải {len(voices)} giọng VieNeu v4.")
+        self._update_action_states()
         if not voices:
             QMessageBox.warning(self, "VieNeu", "Danh sách giọng hiện đang trống.")
 
@@ -758,15 +761,18 @@ class MainWindow(QMainWindow):
                     payload = json.loads(paths.context_json.read_text(encoding="utf-8"))
                     count = payload.get("processed_segments", 0)
                     total = payload.get("total_segments", 0)
-                    complete = payload.get("is_complete", False)
+                    self._context_ready = payload.get("is_complete") is True
+                    state_label = "hoàn tất" if self._context_ready else "chưa hoàn tất"
                     self.context_status.setText(
-                        f"Context Profile: {'hoàn tất' if complete else 'đang dở'} "
+                        f"Context Profile: {state_label} "
                         f"({count}/{total}) — {paths.context_json}"
                     )
                 except (OSError, ValueError):
-                    self.context_status.setText(f"Context Profile: {paths.context_json}")
+                    self._context_ready = False
+                    self.context_status.setText(f"Context Profile lỗi: {paths.context_json}")
                 return
         self.context_path = None
+        self._context_ready = False
         self.context_status.setText("Context Profile: chưa phân tích")
 
     def _update_action_states(self) -> None:
@@ -774,11 +780,19 @@ class MainWindow(QMainWindow):
         transcript_path = Path(self.transcript_input.text().strip()).expanduser()
         translated_path = Path(self.translation_input.text().strip()).expanduser()
         has_transcript = transcript_path.is_file()
-        has_context = (
+        has_context = self._context_ready and (
             self.context_path is not None and self.context_path.is_file()
         )
         if has_transcript and not has_context:
-            has_context = MovieProjectPaths.from_transcript(transcript_path).context_json.is_file()
+            context_file = MovieProjectPaths.from_transcript(transcript_path).context_json
+            if context_file.is_file():
+                try:
+                    context_state = json.loads(context_file.read_text(encoding="utf-8"))
+                    has_context = context_state.get("is_complete") is True
+                    self._context_ready = has_context
+                    self.context_path = context_file
+                except (OSError, ValueError):
+                    has_context = False
         self.transcribe_button.setEnabled(not self._busy and video_path.is_file())
         self.context_button.setEnabled(not self._busy and has_transcript)
         self.translate_button.setEnabled(not self._busy and has_transcript and has_context)
