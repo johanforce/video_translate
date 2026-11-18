@@ -174,7 +174,7 @@ class ProjectPipelineService:
                 self._log(f"[CACHE] Bỏ qua {stage}: kết quả đã hoàn tất và hợp lệ.")
                 return None
 
-            manager.start_stage(stage)
+            manager.start_stage(stage, **details)
             self._log(f"[{stage.upper()}] Bắt đầu hoặc tiếp tục từ checkpoint...")
             try:
                 value = action()
