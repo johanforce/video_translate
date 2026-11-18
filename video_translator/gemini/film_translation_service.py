@@ -162,7 +162,7 @@ class FilmTranslationService:
                     prompt,
                     system_prompt,
                     cancel_event=cancel_event,
-                    max_output_tokens=max(2048, min(8192, batch_size * 64)),
+                    max_output_tokens=max(4096, min(8192, batch_size * 64)),
                 )
                 translated_batch = self._validate_segments(
                     current,
@@ -203,7 +203,7 @@ class FilmTranslationService:
                     qc_prompt,
                     system_prompt,
                     cancel_event=cancel_event,
-                    max_output_tokens=max(1024, min(4096, batch_size * 24)),
+                    max_output_tokens=max(2048, min(4096, batch_size * 24)),
                 )
                 checked_batch, issues = self._apply_qc_response(
                     current,
