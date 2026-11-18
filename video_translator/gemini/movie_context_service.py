@@ -184,7 +184,7 @@ class MovieContextService:
         if (
             saved_signature != config_signature
             or saved_batch_size != batch_size
-            or saved_model != self.model
+            or (saved_model and saved_model != self.model)
         ):
             self._log(
                 f"Giữ checkpoint {processed}/{len(segments)} segment; "
