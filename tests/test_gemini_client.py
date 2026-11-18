@@ -3,7 +3,11 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from video_translator.gemini.client import GeminiClientError, GeminiJsonClient
+from video_translator.gemini.client import (
+    GeminiClientError,
+    GeminiJsonClient,
+    GeminiOutputLimitError,
+)
 from video_translator.gemini.prompt_loader import render_prompt
 
 
@@ -43,7 +47,7 @@ class GeminiClientTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             debug_path = Path(temp_dir) / "chapter-03.raw.txt"
             with self.assertRaisesRegex(
-                GeminiClientError,
+                GeminiOutputLimitError,
                 "finish_reason=MAX_TOKENS",
             ) as raised:
                 client.generate_json(
