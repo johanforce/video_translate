@@ -23,6 +23,10 @@ class FullPipelineCacheTests(unittest.TestCase):
                     "language": "en",
                     "model": "small",
                     "requested_language": "auto",
+                    "transcription_signature": sha256_text(
+                        f"{sha256_file(video)}|small|auto|240|"
+                        "mono16k-pcm|word-timestamps-v1"
+                    ),
                     "segments": [{"id": 1, "start": 0.0, "end": 1.2, "text": "Hello"}],
                 }),
                 encoding="utf-8",
