@@ -71,7 +71,7 @@ class VideoDownloader:
                 f"bv*[height<={self.max_height}][ext=mp4]+ba[ext=m4a]/"
                 f"b[height<={self.max_height}][ext=mp4]/"
                 f"bv*[height<={self.max_height}]+ba/"
-                f"b[height<={self.max_height}]/best"
+                f"b[height<={self.max_height}]"
             ),
             "outtmpl": str(self.output_dir / "%(title).160B [%(id)s].%(ext)s"),
             "noplaylist": True,
@@ -191,12 +191,31 @@ class VideoDownloader:
         if candidates:
             return candidates[0]
 
+        requested_downloads = info.get("requested_downloads")
+        if isinstance(requested_downloads, list):
+            for item in requested_downloads:
+                if not isinstance(item, dict):
+                    continue
+                requested_path = item.get("filepath")
+                if isinstance(requested_path, str):
+                    candidate = Path(requested_path).with_suffix(".mp4")
+                    if candidate.is_file():
+                        return candidate
+
         prepared = info.get("_filename")
         if isinstance(prepared, str):
             candidate = Path(prepared).with_suffix(".mp4")
             if candidate.is_file():
                 return candidate
-        return None
+
+        # The title template embeds the video ID in square brackets. Match
+        # the ID as a substring; square brackets have special meaning in glob().
+        candidates = sorted(
+            self.output_dir.glob(f"*{video_id}*.mp4"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        return candidates[0] if candidates else None
 
     def _emit_progress(self, progress: DownloadProgress) -> None:
         if self.progress_callback:
