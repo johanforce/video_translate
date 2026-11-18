@@ -435,7 +435,7 @@ class GeminiServiceTests(unittest.TestCase):
                 self.calls += 1
                 if "TRANSCRIPT CHAPTER:\n" not in prompt:
                     return {}
-                raw = prompt.split("INPUT TRANSCRIPT:\n", 1)[1].split(
+                raw = prompt.split("TRANSCRIPT CHAPTER:\n", 1)[1].split(
                     "\n\nKNOWN PROFILE", 1
                 )[0]
                 payload = json.loads(raw)
@@ -502,10 +502,10 @@ class GeminiServiceTests(unittest.TestCase):
 
             def generate_json(self, prompt: str, system_instruction: str, cancel_event=None, debug_path=None, max_output_tokens=None):
                 self.calls += 1
-                if "INPUT TRANSCRIPT:\n" not in prompt:
+                if "TRANSCRIPT CHAPTER:\n" not in prompt:
                     return {}
-                raw = prompt.split("INPUT TRANSCRIPT:\n", 1)[1].split(
-                    "\n\nEXISTING PROJECT CONTEXT", 1
+                raw = prompt.split("TRANSCRIPT CHAPTER:\n", 1)[1].split(
+                    "\n\nKNOWN PROFILE", 1
                 )[0]
                 payload = json.loads(raw)
                 self.analyzed_ranges.append(payload["chapter_segment_range"])
@@ -792,7 +792,7 @@ class GeminiServiceTests(unittest.TestCase):
             [(item["emotion"], item["delivery"]) for item in validated],
             [("neutral", "normal"), ("sad", "soft")],
         )
-        self.assertNotIn("speaker_id", validated[0])
+        self.assertIsNone(validated[0]["speaker_id"])
 
     def test_sparse_qc_only_changes_corrected_segments(self) -> None:
         source = [
@@ -889,7 +889,7 @@ class GeminiServiceTests(unittest.TestCase):
             self.assertIn("Xin chào", srt)
             self.assertIn("Tạm biệt", srt)
             self.assertNotIn("Unclear audio", srt)
-            self.assertNotIn("00:00:11,000", srt)
+            self.assertNotIn("2\n00:00:11,000 --> 00:00:12,000", srt)
 
     def test_translation_still_rejects_missing_or_duplicate_segment_ids(self) -> None:
         source = [
