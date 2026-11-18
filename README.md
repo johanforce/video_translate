@@ -91,9 +91,9 @@ python main.py
 1. **Video & Transcript** — paste a YouTube/Bilibili URL or choose a local video; download and transcribe.
 2. **Gemini Film Translation** — analyze the whole transcript, then translate and QC.
 3. **VieNeu Dubbing** — load v4 voices, choose a voice and speed, then synthesize each segment.
-4. **Project & Export** — open the transcript/project, inspect stage checkpoints, resume missing work, and render the final MP4.
+4. **Project & Export** — open an existing transcript or enter a video URL/local file, choose subtitle/audio options, then press **Chạy toàn bộ / Tiếp tục project**.
 
-The **Continue missing stage** action resumes the project from the first incomplete step. If TTS is next, choose a VieNeu voice first. If render is next, the selected subtitle and original-audio options are used.
+The single pipeline action checks every stage in order and skips matching completed artifacts. On a new project it downloads/transcribes/analyzes/translates/dubs/renders; on restart it resumes only incomplete work. If TTS has already submitted jobs, it restores the saved voice configuration and resumes the existing job IDs.
 
 ## Cache and recovery behavior
 
@@ -112,7 +112,7 @@ All durable project data is stored beside the output project:
 - `<movie>.vi.dubbed.mp4` / `.render.json` — final render and artifact fingerprints.
 - `<movie>.project.json` — project stages and history.
 
-If Gemini returns a valid translation and then the QC call fails, the translation is already saved; the next run will not translate those segments again. If the application closes between Whisper chunks, completed chunks are skipped. If it closes during MP4 rendering, the partial output is discarded and rendering is repeated from cached narration/TTS artifacts.
+If Gemini returns a valid translation and then the QC call fails, the translation response is checkpointed before QC; the next run retries QC only. Context chapter responses and the final context response are also saved before profile consolidation. If the application closes between Whisper chunks, completed chunks are skipped. VieNeu request keys are written before submission and job IDs immediately after acceptance, so a restarted run polls the same job rather than creating a duplicate. If the application closes during MP4 rendering, the incomplete output is discarded and rendering is repeated from cached narration/TTS/prepared clips—not from Gemini or VieNeu.
 
 Do not delete `.video_translator_cache`, `.tts` or project JSON files if you want to resume from previous work. API keys are read from `.env` or can be entered in the app; they are not written to project files.
 
