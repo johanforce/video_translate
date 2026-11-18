@@ -96,6 +96,17 @@ class AudioTimelineBuilder:
         if not isinstance(entries, dict):
             raise AudioTimelineError("VieNeu manifest không có danh sách audio segment.")
 
+        ordered_segments = sorted(
+            [item for item in segments if isinstance(item, dict)],
+            key=lambda item: (float(item.get("start", 0.0)), int(item.get("id", 0))),
+        )
+        speech_segments = [
+            item for item in ordered_segments
+            if str(item.get("translated_text", "")).strip()
+        ]
+        if not speech_segments:
+            raise AudioTimelineError("Không có câu thoại tiếng Việt để lồng tiếng.")
+
         source_video = Path(transcript.get("source_video", "")).expanduser()
         if not source_video.is_file():
             raise AudioTimelineError(
@@ -133,14 +144,6 @@ class AudioTimelineBuilder:
         )
         prepared_entries: dict[str, Any] = prepared_state["segments"]
 
-        ordered_segments = sorted(
-            [item for item in segments if isinstance(item, dict)],
-            key=lambda item: (float(item.get("start", 0.0)), int(item.get("id", 0))),
-        )
-        speech_segments = [
-            item for item in ordered_segments
-            if str(item.get("translated_text", "")).strip()
-        ]
         missing = []
         for item in speech_segments:
             key = str(int(item.get("id", 0)))
@@ -158,9 +161,6 @@ class AudioTimelineBuilder:
                 f"Thiếu audio VieNeu cho {len(missing)} segment (ví dụ: {', '.join(missing[:8])}). "
                 "Hãy chạy lại VieNeu; các segment đã hoàn thành sẽ dùng cache."
             )
-        if not speech_segments:
-            raise AudioTimelineError("Không có câu thoại tiếng Việt để lồng tiếng.")
-
         self._log(
             f"Chuẩn bị {len(speech_segments)} audio segment, timeline {duration:.1f} giây."
         )
