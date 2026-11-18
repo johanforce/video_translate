@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+from pathlib import Path
 from typing import Any
 
 from video_translator.core.errors import VideoTranslatorError
@@ -39,6 +40,7 @@ class GeminiJsonClient:
         system_instruction: str,
         cancel_event: threading.Event | None = None,
         max_attempts: int = 4,
+        debug_path: Path | None = None,
     ) -> dict[str, Any]:
         cancel_event = cancel_event or threading.Event()
         config = self._types.GenerateContentConfig(
@@ -60,7 +62,17 @@ class GeminiJsonClient:
                 response_text = getattr(response, "text", None)
                 if not response_text or not response_text.strip():
                     raise GeminiClientError("Gemini trả về nội dung rỗng.")
-                return self._parse_json(response_text)
+                try:
+                    return self._parse_json(response_text)
+                except GeminiClientError as parse_error:
+                    diagnostics = self._response_diagnostics(response)
+                    saved_path = self._save_raw_response(debug_path, response_text)
+                    details = [str(parse_error)]
+                    if diagnostics:
+                        details.append(diagnostics)
+                    if saved_path:
+                        details.append(saved_path)
+                    raise GeminiClientError(" ".join(details)) from parse_error
             except Exception as exc:
                 last_error = exc
                 if not self._is_retryable(exc) or attempt >= max_attempts:
@@ -77,8 +89,8 @@ class GeminiJsonClient:
         cleaned = text.strip()
         fence = chr(96) * 3
         if cleaned.startswith(fence):
-            cleaned = re.sub(r"^" + re.escape(fence) + r"(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
-            cleaned = re.sub(r"\s*" + re.escape(fence) + r"$", "", cleaned)
+            cleaned = re.sub(r"^" + re.escape(fence) + r"(?:json)?\\s*", "", cleaned, flags=re.IGNORECASE)
+            cleaned = re.sub(r"\\s*" + re.escape(fence) + r"$", "", cleaned)
         try:
             value = json.loads(cleaned)
         except json.JSONDecodeError as exc:
@@ -88,6 +100,34 @@ class GeminiJsonClient:
         if not isinstance(value, dict):
             raise GeminiClientError("Gemini phải trả về một JSON object.")
         return value
+
+    @staticmethod
+    def _response_diagnostics(response: Any) -> str:
+        """Extract provider metadata useful for diagnosing incomplete JSON output."""
+        details: list[str] = []
+        candidates = getattr(response, "candidates", None) or []
+        if candidates:
+            finish_reason = getattr(candidates[0], "finish_reason", None)
+            if finish_reason is not None:
+                details.append(f"finish_reason={finish_reason}")
+        usage = getattr(response, "usage_metadata", None)
+        total_tokens = getattr(usage, "total_token_count", None) if usage else None
+        if total_tokens is not None:
+            details.append(f"total_token_count={total_tokens}")
+        return f"[Gemini: {'; '.join(details)}]" if details else ""
+
+    @staticmethod
+    def _save_raw_response(debug_path: Path | None, response_text: str) -> str:
+        """Save invalid model output without allowing a disk error to hide the parse error."""
+        if debug_path is None:
+            return ""
+        path = Path(debug_path)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(response_text, encoding="utf-8", newline="\\n")
+        except OSError as exc:
+            return f"Không lưu được phản hồi gốc ({path}): {exc}"
+        return f"Phản hồi Gemini gốc đã lưu: {path}"
 
     @staticmethod
     def _is_retryable(exc: Exception) -> bool:
