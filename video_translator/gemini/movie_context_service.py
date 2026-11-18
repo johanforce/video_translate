@@ -199,12 +199,16 @@ class MovieContextService:
                     f"Gemini context chapter {batch_index + 1}/{len(batches)} "
                     f"(segments {chunk_start + 1}-{min(chunk_end, len(segments))})..."
                 )
+                debug_path = paths.context_json.with_name(
+                    f"{paths.context_json.stem}.chapter-{batch_index + 1:02d}.raw.txt"
+                )
                 response = self.client.generate_json(
                     prompt,
                     system_prompt,
                     cancel_event=cancel_event,
+                    debug_path=debug_path,
                 )
-                # Store the raw model response before merging it into the accumulated profile.
+                # Store the parsed chapter response before merging it into the accumulated profile.
                 chapter_responses[str(batch_index)] = {
                     "signature": chapter_signature,
                     "response": response,
@@ -259,10 +263,14 @@ class MovieContextService:
             finalized = cached_finalize
         else:
             self._log("Gemini đang hợp nhất nhân vật, quan hệ và thuật ngữ...")
+            debug_path = paths.context_json.with_name(
+                f"{paths.context_json.stem}.finalize.raw.txt"
+            )
             finalized = self.client.generate_json(
                 finalize_prompt,
                 system_prompt,
                 cancel_event=cancel_event,
+                debug_path=debug_path,
             )
             # Save the final API response before normalizing/writing the completed profile.
             state["finalize_signature"] = config_signature
