@@ -13,6 +13,10 @@ class GeminiClientError(VideoTranslatorError):
     """Raised for Gemini API, response, or configuration errors."""
 
 
+class GeminiOutputLimitError(GeminiClientError):
+    """Raised when Gemini truncates a response because it reached MAX_TOKENS."""
+
+
 class GeminiJsonClient:
     """Small provider wrapper that requests JSON and retries transient failures."""
 
@@ -72,7 +76,10 @@ class GeminiJsonClient:
                         details.append(diagnostics)
                     if saved_path:
                         details.append(saved_path)
-                    raise GeminiClientError(" ".join(details)) from parse_error
+                    message = " ".join(details)
+                    if self._hit_output_limit(response):
+                        raise GeminiOutputLimitError(message) from parse_error
+                    raise GeminiClientError(message) from parse_error
             except Exception as exc:
                 last_error = exc
                 if not self._is_retryable(exc) or attempt >= max_attempts:
@@ -115,6 +122,14 @@ class GeminiJsonClient:
         if total_tokens is not None:
             details.append(f"total_token_count={total_tokens}")
         return f"[Gemini: {'; '.join(details)}]" if details else ""
+
+    @staticmethod
+    def _hit_output_limit(response: Any) -> bool:
+        candidates = getattr(response, "candidates", None) or []
+        if not candidates:
+            return False
+        finish_reason = getattr(candidates[0], "finish_reason", None)
+        return "MAX_TOKENS" in str(finish_reason).upper()
 
     @staticmethod
     def _save_raw_response(debug_path: Path | None, response_text: str) -> str:
