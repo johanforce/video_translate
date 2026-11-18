@@ -1123,12 +1123,108 @@ class MainWindow(QMainWindow):
                 pass
             if source_video.is_file():
                 self.video_input.setText(str(source_video))
+            self._restore_project_settings(transcript_path, paths)
             self._refresh_context_status()
             self._refresh_project()
             self._update_action_states()
         except Exception as exc:
             self.project_manager = None
             self._append_log(f"Không thể nạp project state: {exc}")
+
+    def _restore_project_settings(
+        self,
+        transcript_path: Path,
+        paths: MovieProjectPaths,
+    ) -> None:
+        """Restore project-specific choices so a restart uses the same cache keys."""
+        if not self.project_manager:
+            return
+        stages = self.project_manager.state.get("stages", {})
+
+        transcription = stages.get("transcription", {})
+        whisper_model = transcription.get("model")
+        if whisper_model:
+            index = self.model_combo.findData(str(whisper_model))
+            if index >= 0:
+                self.model_combo.setCurrentIndex(index)
+
+        try:
+            transcript_data = json.loads(transcript_path.read_text(encoding="utf-8"))
+            requested_language = transcript_data.get("requested_language")
+            if requested_language:
+                language_index = self.language_combo.findData(
+                    "auto" if requested_language == "auto" else str(requested_language)
+                )
+                if language_index >= 0:
+                    self.language_combo.setCurrentIndex(language_index)
+        except (OSError, ValueError):
+            pass
+
+        context = stages.get("context", {})
+        translation = stages.get("translation", {})
+        gemini_model = (
+            translation.get("model")
+            or context.get("model")
+        )
+        if gemini_model:
+            index = self.gemini_model_combo.findData(str(gemini_model))
+            if index >= 0:
+                self.gemini_model_combo.setCurrentIndex(index)
+
+        batch_size = translation.get("batch_size")
+        if batch_size is None:
+            chapter_size = context.get("batch_segments")
+            if chapter_size:
+                batch_size = max(5, min(100, int(chapter_size) // 6))
+        if batch_size is not None:
+            self.translation_batch_spin.setValue(
+                max(5, min(100, int(batch_size)))
+            )
+
+        tts_state: dict = {}
+        if paths.tts_manifest.is_file():
+            try:
+                tts_state = json.loads(
+                    paths.tts_manifest.read_text(encoding="utf-8")
+                )
+            except (OSError, ValueError):
+                tts_state = {}
+
+        tts_stage = stages.get("tts", {})
+        saved_voice = (
+            tts_stage.get("voice_id")
+            or tts_state.get("voice_id")
+        )
+        saved_speed = (
+            tts_stage.get("speed")
+            if tts_stage.get("speed") is not None
+            else tts_state.get("speed")
+        )
+        if saved_voice:
+            voice_id = str(saved_voice)
+            index = self.voice_combo.findData(voice_id)
+            if index < 0:
+                self.voice_combo.addItem(f"Project voice · {voice_id}", voice_id)
+                index = self.voice_combo.findData(voice_id)
+            if index >= 0:
+                self.voice_combo.setCurrentIndex(index)
+        if saved_speed is not None:
+            try:
+                self.voice_speed_spin.setValue(float(saved_speed))
+            except (TypeError, ValueError):
+                pass
+
+        render = stages.get("render", {})
+        subtitle_mode = render.get("subtitle_mode")
+        original_audio_mode = render.get("original_audio_mode")
+        if subtitle_mode:
+            index = self.subtitle_mode_combo.findData(str(subtitle_mode))
+            if index >= 0:
+                self.subtitle_mode_combo.setCurrentIndex(index)
+        if original_audio_mode:
+            index = self.original_audio_combo.findData(str(original_audio_mode))
+            if index >= 0:
+                self.original_audio_combo.setCurrentIndex(index)
 
     def _set_project_from_translation(self, translated_path: Path) -> None:
         try:
