@@ -216,11 +216,9 @@ class ProjectManager:
             value = read_json(self.paths.tts_manifest)
             if value.get("is_complete") is not True or not self.paths.translated_json.is_file():
                 return False
-            translation_fingerprint = __import__(
-                "hashlib"
-            ).sha256(
-                self.paths.translated_json.read_text(encoding="utf-8").encode("utf-8")
-            ).hexdigest()
+            translation_fingerprint = sha256_text(
+                self.paths.translated_json.read_text(encoding="utf-8")
+            )
             if value.get("translation_fingerprint") != translation_fingerprint:
                 return False
             entries = value.get("segments", {})
@@ -261,6 +259,12 @@ class ProjectManager:
             if not self.paths.translated_json.is_file() or not self.paths.tts_manifest.is_file():
                 return False
             if info.get("translation_fingerprint") != sha256_file(self.paths.translated_json):
+                return False
+            transcript = read_json(self.paths.transcript_json)
+            source_video = Path(str(transcript.get("source_video", "")))
+            if not source_video.is_file():
+                return False
+            if info.get("source_video_fingerprint") != sha256_file(source_video):
                 return False
             if info.get("tts_manifest_fingerprint") != sha256_file(self.paths.tts_manifest):
                 return False
