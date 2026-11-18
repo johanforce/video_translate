@@ -70,11 +70,15 @@ class VieNeuTTSService:
         if not voice_id:
             raise TTSServiceError("Hãy chọn giọng VieNeu.")
         speed = max(0.5, min(3.0, float(speed)))
+        translation_text = Path(translated_json).read_text(encoding="utf-8")
+        translation_fingerprint = sha256_text(translation_text)
         config_signature = sha256_text(
-            f"{voice_id}|{speed:.2f}|v4|{sha256_text(Path(translated_json).read_text(encoding='utf-8'))}"
+            f"{voice_id}|{speed:.2f}|v4|{translation_fingerprint}"
         )
         manifest: dict[str, Any] = {
             "schema_version": 1,
+            "translated_json": str(Path(translated_json).resolve()),
+            "translation_fingerprint": translation_fingerprint,
             "voice_id": voice_id,
             "speed": speed,
             "engine": "v4",
@@ -86,7 +90,10 @@ class VieNeuTTSService:
                 existing = read_json(paths.tts_manifest)
             except ValueError:
                 existing = {}
-            if existing.get("config_signature") == config_signature:
+            if (
+                existing.get("config_signature") == config_signature
+                and existing.get("translation_fingerprint") == translation_fingerprint
+            ):
                 manifest = existing
         manifest.setdefault("segments", {})
         paths.tts_dir.mkdir(parents=True, exist_ok=True)
