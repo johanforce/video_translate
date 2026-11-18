@@ -71,7 +71,12 @@ class ProjectManager:
         self.state["source_transcript"] = str(self.paths.transcript_json)
 
         stages = self.state.setdefault("stages", {})
-        self._set_reconciled(stages, "transcription", bool(artifacts["transcript"]))
+        self._set_reconciled(
+            stages,
+            "transcription",
+            self._transcription_complete(),
+            self._transcription_progress(),
+        )
         self._set_reconciled(
             stages,
             "context",
@@ -158,6 +163,33 @@ class ProjectManager:
             if self.state["stages"].get(stage, {}).get("status") != "completed":
                 return stage
         return None
+
+    def _transcription_complete(self) -> bool:
+        if not self.paths.transcript_json.is_file():
+            return False
+        try:
+            value = read_json(self.paths.transcript_json)
+            # Legacy v0.2 transcript files did not contain is_complete.
+            return value.get("is_complete") is not False
+        except (ValueError, OSError):
+            return False
+
+    def _transcription_progress(self) -> int:
+        if not self.paths.transcript_json.is_file():
+            return 0
+        try:
+            value = read_json(self.paths.transcript_json)
+            if value.get("is_complete") is not False:
+                return 100
+            checkpoint = Path(str(value.get("checkpoint_path", "")))
+            if not checkpoint.is_file():
+                return 0
+            state = read_json(checkpoint)
+            total = int(state.get("total_chunks", 0))
+            done = int(state.get("completed_chunks", 0))
+            return int(done / total * 100) if total else 0
+        except (ValueError, OSError, TypeError):
+            return 0
 
     def _context_complete(self) -> bool:
         if not self.paths.context_json.is_file():
