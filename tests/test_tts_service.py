@@ -102,8 +102,19 @@ class TTSServiceTests(unittest.TestCase):
                 service.run(paths.translated_json, "Ngọc Lan", speed=1.0)
                 self.assertEqual(FakeVieNeuClient.calls, 2)
 
+                # Migrate a legacy v0.5 manifest that predates translation_fingerprint.
+                legacy_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                legacy_manifest.pop("translation_fingerprint", None)
+                manifest_path.write_text(
+                    json.dumps(legacy_manifest),
+                    encoding="utf-8",
+                )
+                service.run(paths.translated_json, "Ngọc Lan", speed=1.0)
+                self.assertEqual(FakeVieNeuClient.calls, 2)
+
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
                 self.assertTrue(manifest["is_complete"])
+                self.assertTrue(manifest["translation_fingerprint"])
                 self.assertEqual(manifest["segments"]["1"]["status"], "completed")
 
 
