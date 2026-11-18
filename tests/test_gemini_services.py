@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from video_translator.gemini.film_translation_service import FilmTranslationService
+from video_translator.gemini.film_translation_service import FilmTranslationError, FilmTranslationService
 from video_translator.gemini.movie_context_service import MovieContextService
 from video_translator.gemini.project_paths import MovieProjectPaths
 
@@ -187,7 +187,7 @@ class GeminiServiceTests(unittest.TestCase):
                 "translated_text": "Xin chào",
             }
         ]
-        with self.assertRaisesRegex(ValueError, "timestamp"):
+        with self.assertRaisesRegex(FilmTranslationError, "timestamp"):
             FilmTranslationService._validate_segments(source, result, "test")
 
 
