@@ -65,6 +65,17 @@ class GeminiJsonClient:
                 )
                 response_text = getattr(response, "text", None)
                 if not response_text or not response_text.strip():
+                    diagnostics = self._response_diagnostics(response)
+                    if self._hit_output_limit(response):
+                        message = "Gemini đã chạm MAX_TOKENS nhưng không trả về nội dung JSON."
+                        if diagnostics:
+                            message += f" [{diagnostics}]"
+                        saved_path = self._save_raw_response(
+                            debug_path, response_text or ""
+                        )
+                        if saved_path:
+                            message += f" {saved_path}"
+                        raise GeminiOutputLimitError(message)
                     raise GeminiClientError("Gemini trả về nội dung rỗng.")
                 try:
                     return self._parse_json(response_text)
