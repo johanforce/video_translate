@@ -62,7 +62,7 @@ class GeminiClientTests(unittest.TestCase):
 
     def test_invalid_json_with_stop_is_repaired_once(self) -> None:
         first = SimpleNamespace(
-            text='{"characters": [\\n  {"name": "A",}\\n]}',
+            text='{"characters": [\n  {"name": "A",}\n]}',
             candidates=[SimpleNamespace(finish_reason="STOP")],
             usage_metadata=SimpleNamespace(total_token_count=9166),
         )
@@ -103,7 +103,7 @@ class GeminiClientTests(unittest.TestCase):
             self.assertTrue(debug_path.is_file())
             self.assertEqual(
                 debug_path.with_suffix(".repaired.json").read_text(encoding="utf-8"),
-                '{\\n  "characters": [\\n    {\\n      "name": "A"\\n    }\\n  ]\\n}',
+                '{\n  "characters": [\n    {\n      "name": "A"\n    }\n  ]\n}',
             )
 
     def test_json_repair_max_tokens_is_reported_as_output_limit(self) -> None:
