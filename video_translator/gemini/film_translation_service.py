@@ -377,6 +377,27 @@ class FilmTranslationService:
                 state["config_signature"] = signature
                 state["model"] = current_model
                 return state
+
+            # Prompt revisions can change the response schema (for example, no
+            # longer asking Gemini to echo timestamps). Keep already accepted,
+            # QC-completed segments for the same transcript/context/batch size.
+            # Pending responses are discarded because they may follow the old schema.
+            try:
+                saved_batch_size = int(state.get("batch_size", 0) or 0)
+            except (TypeError, ValueError):
+                saved_batch_size = 0
+            if (
+                state.get("source_fingerprint") == source_fingerprint
+                and state.get("context_fingerprint") == context_fingerprint
+                and saved_batch_size == batch_size
+                and isinstance(state.get("segments"), list)
+            ):
+                state["config_signature"] = signature
+                state["model"] = current_model
+                state["pending_batches"] = {}
+                state["is_complete"] = False
+                return state
+
         return {
             "schema_version": 1,
             "source_transcript": str(paths.transcript_json),
