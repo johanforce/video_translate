@@ -16,12 +16,17 @@ from video_translator.core.errors import VideoTranslatorError
 
 ProgressCallback = Callable[[int, str], None]
 LogCallback = Callable[[str], None]
+JobCallback = Callable[[str, dict[str, Any]], None]
 
 API_BASE = "https://api.vieneu.io/api/v1"
 
 
 class VieNeuError(VideoTranslatorError):
     """Raised when VieNeu voice listing or synthesis fails."""
+
+
+class VieNeuJobFailedError(VieNeuError):
+    """Raised when VieNeu confirms that a synthesis job failed."""
 
 
 class VieNeuClient:
@@ -93,6 +98,7 @@ class VieNeuClient:
         output_dir: Path,
         cancel_event: threading.Event,
         log_callback: LogCallback | None = None,
+        job_callback: JobCallback | None = None,
     ) -> tuple[Path, dict[str, Any]]:
         """Submit or resume one idempotent TTS job and download the generated audio."""
         clean_text = (text or "").strip()
@@ -113,6 +119,8 @@ class VieNeuClient:
         self._log(log_callback, f"VieNeu: gửi segment {segment_id}...")
         response_data = self._submit_job(body, headers, cancel_event)
         job_id = response_data.get("jobId")
+        if job_callback and job_id:
+            job_callback(str(job_id), response_data)
         status = str(response_data.get("status") or "").lower()
         audio_url = response_data.get("audioUrl")
 
@@ -142,6 +150,35 @@ class VieNeuClient:
         }
         self._log(log_callback, f"VieNeu: hoàn tất segment {segment_id} -> {audio_path.name}")
         return audio_path, metadata
+
+    def resume_segment(
+        self,
+        job_id: str,
+        segment_id: int,
+        request_key: str,
+        voice_id: str,
+        speed: float,
+        output_dir: Path,
+        cancel_event: threading.Event,
+        log_callback: LogCallback | None = None,
+    ) -> tuple[Path, dict[str, Any]]:
+        """Resume polling an accepted TTS job after an application restart."""
+        payload = self._poll_job(job_id, cancel_event, segment_id, log_callback)
+        audio_url = payload.get("audioUrl")
+        if not isinstance(audio_url, str) or not audio_url.startswith("https://"):
+            raise VieNeuError(f"VieNeu không trả audioUrl cho job {job_id}.")
+        output_path = self._download_audio(
+            audio_url, Path(output_dir), segment_id, request_key
+        )
+        return output_path, {
+            "job_id": job_id,
+            "status": "completed",
+            "audio_path": str(output_path),
+            "duration_seconds": payload.get("duration"),
+            "voice_id": voice_id,
+            "speed": round(float(speed), 2),
+            "request_key": request_key,
+        }
 
     def _submit_job(
         self,
@@ -219,7 +256,7 @@ class VieNeuClient:
             if status == "completed" and payload.get("audioUrl"):
                 return payload
             if status in {"failed", "error", "cancelled", "canceled"}:
-                raise VieNeuError(
+                raise VieNeuJobFailedError(
                     f"VieNeu job {job_id} thất bại ở segment {segment_id}: "
                     f"{payload.get('message') or payload.get('error') or status}"
                 )
@@ -241,8 +278,10 @@ class VieNeuClient:
             payload = {}
         if not isinstance(payload, dict):
             payload = {}
-        code = payload.get("code") or payload.get("error", {}).get("code") if isinstance(payload.get("error"), dict) else payload.get("code")
-        message = payload.get("message") or payload.get("error", {}).get("message") if isinstance(payload.get("error"), dict) else payload.get("message")
+        nested = payload.get("error")
+        nested = nested if isinstance(nested, dict) else {}
+        code = payload.get("code") or nested.get("code")
+        message = payload.get("message") or nested.get("message")
         message = message or response.text[:1000] or response.reason
         if response.status_code == 403 or code in {
             "GRANT_EXPIRED", "GRANT_TOKENS_EXHAUSTED", "GRANT_DAILY_LIMIT",
