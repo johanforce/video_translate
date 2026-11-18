@@ -37,21 +37,27 @@ def save_transcript(
     document: TranscriptDocument,
     video_path: Path,
     output_dir: Path,
+    is_complete: bool = True,
+    transcription_signature: str = "",
+    checkpoint_path: Path | None = None,
 ) -> tuple[Path, Path]:
-    """Atomically save transcript JSON and source-language SRT."""
+    """Atomically save full or partial timestamped transcript and source-language SRT."""
     source = Path(video_path)
     destination = Path(output_dir).expanduser()
     destination.mkdir(parents=True, exist_ok=True)
 
     document.source_video = str(source.resolve())
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "source_video": document.source_video,
         "language": document.language,
         "language_probability": document.language_probability,
         "duration_seconds": document.duration_seconds,
         "model": document.model_name,
+        "is_complete": bool(is_complete),
+        "transcription_signature": transcription_signature,
+        "checkpoint_path": str(checkpoint_path.resolve()) if checkpoint_path else "",
         "segments": [
             {
                 "id": segment.id,
