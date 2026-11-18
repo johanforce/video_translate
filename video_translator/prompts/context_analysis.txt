@@ -1,82 +1,30 @@
-TASK: ANALYZE THE FILM TRANSCRIPT AND BUILD A PERSISTENT CONTEXT PROFILE
+TASK: INCREMENTALLY BUILD A COMPACT FILM CONTEXT PROFILE FOR VIETNAMESE DUBBING
 
-Act as a film script analyst preparing a reference guide for a professional Vietnamese dubbing translator.
-
-INPUT TRANSCRIPT:
+TRANSCRIPT CHAPTER:
 {{TRANSCRIPT_JSON}}
 
-EXISTING PROJECT CONTEXT (may be empty; update rather than discard established facts):
+KNOWN PROFILE (compact; update, do not repeat):
 {{CONTEXT_PROFILE_JSON}}
 
-OBJECTIVE
-Build a concise but useful reference profile that helps translate the entire film consistently. Analyze the supplied transcript as a connected narrative, not as unrelated sentences.
+Analyze this chapter as part of the same story. Return only new observations and material corrections. Reuse known character_id values. Do not repeat established names, aliases, relationships, terminology, or style rules.
 
-INCREMENTAL OUTPUT (IMPORTANT)
-- The application merges this chapter's JSON into the existing profile automatically.
-- Return only new observations from this chapter and material corrections/updates to existing observations. Do not repeat the entire existing profile.
-- For a known character, reuse the existing character_id and return only fields that this chapter adds or materially changes.
-- Do not restate known aliases, relationships, terminology, style rules, or continuity facts unless this chapter provides new evidence.
-- Keep each description to one short sentence. Avoid plot summaries and long prose.
-- Add at most 5 genuinely new continuity facts, 8 terminology entries, and 5 uncertainties in one chapter; prioritize recurring or translation-critical information.
-- Prefer short evidence-backed entries over exhaustive speculation. Empty arrays and strings are valid.
+PRIORITIZE
+- Characters who recur, speak meaningfully, or affect the plot. Record only evidence-backed names/roles, personality, speech style, relationships, and practical Vietnamese addressing rules.
+- Important relationships and hierarchy that affect pronouns or dialogue.
+- Recurring names, titles, places, ranks, organizations, and terms with a stable Vietnamese rendering.
+- A few important continuity facts needed by later translation batches.
+- Genuine ambiguities or possible transcript errors; do not speculate.
 
-ANALYZE
+OUTPUT LIMITS
+- At most 5 new/updated characters, 5 relationships, 6 terms, 3 continuity facts, and 3 uncertainties per chapter.
+- Keep each description short (one sentence, preferably under 20 words).
+- Do not include segment evidence lists, confidence scores, timestamps, plot summaries, or repeated facts.
+- For a known character, return only changed/new fields plus character_id and name.
+- Use empty arrays when there is nothing new. Never fill fields with guesses.
 
-1. Film profile
-- Likely genre and subgenre.
-- Setting, time period, social/cultural environment, and relevant world rules.
-- Central premise and plot developments actually supported by the transcript.
-- Narrative tone and preferred Vietnamese localization style.
-- Recurring themes, motifs, and important recurring references.
-
-2. Characters
-For every identifiable character, provide:
-- Stable character ID (reuse an existing ID whenever possible).
-- Name and known aliases.
-- Evidence segment IDs supporting identification.
-- Role and concise personality description, only when supported.
-- Approximate age range only if the dialogue gives reliable evidence.
-- Speech style, register, verbal habits, and emotional tendencies.
-- Known relationships and their evidence.
-- Suggested Vietnamese forms of self-reference and address for each known relationship.
-- Confidence: high, medium, or low.
-
-3. Relationships and forms of address
-- Map family, romantic, friendship, professional, hierarchical, and adversarial relationships.
-- Distinguish confirmed relationships from uncertain interpretations.
-- Provide practical Vietnamese addressing rules for both directions of each relationship.
-- Record deliberate changes of address and the emotional or narrative circumstances in which they occur.
-- Do not assume Vietnamese pronouns from names, gender, or age alone.
-
-4. Terminology and named entities
-- Names, places, organizations, ranks, honorifics, fictional concepts, technical vocabulary, recurring objects, and culturally specific references.
-- Recommended Vietnamese rendering.
-- Whether a term should remain untranslated.
-- Evidence segment IDs and confidence.
-- Keep alternative translations only when the context genuinely remains ambiguous.
-
-5. Continuity and unresolved questions
-- Timeline facts and chronology.
-- Important facts revealed so far.
-- Ambiguous speakers, unclear references, uncertain relationships, and possible speech-recognition errors.
-- Contradictions between transcript sections.
-- Details that later batches should preserve.
-
-STRICT RULES
-- Do not invent scenes, character identities, relationships, motivations, or plot facts.
-- Do not identify a speaker solely from gendered language unless the evidence is strong.
-- Do not treat a hypothesis as confirmed canon.
-- Cite evidence using transcript segment IDs, not fabricated timestamps.
-- Preserve established IDs and terminology from the existing profile.
-- When the transcript is only a partial film or chapter, explicitly mark the profile as partial. Do not infer the ending.
-- Prefer a compact profile that is actionable for translation over a long plot retelling.
-
-OUTPUT
-Return one compact valid JSON object, containing only the new/updated observations for this chapter, with this top-level structure:
-
+Return one compact JSON object:
 {
   "film_profile": {
-    "is_partial": true,
     "genre": "",
     "setting": "",
     "premise": "",
@@ -93,9 +41,7 @@ Return one compact valid JSON object, containing only the new/updated observatio
       "personality": "",
       "speech_style": "",
       "relationships": [],
-      "addressing_rules": [],
-      "evidence_segment_ids": [],
-      "confidence": "high"
+      "addressing_rules": []
     }
   ],
   "relationships": [],
@@ -104,9 +50,7 @@ Return one compact valid JSON object, containing only the new/updated observatio
       "source_term": "",
       "vietnamese_term": "",
       "keep_original": false,
-      "meaning_in_context": "",
-      "evidence_segment_ids": [],
-      "confidence": "high"
+      "meaning_in_context": ""
     }
   ],
   "style_guide": {
@@ -118,5 +62,3 @@ Return one compact valid JSON object, containing only the new/updated observatio
   },
   "uncertainties": []
 }
-
-Use empty arrays or empty strings when information is unavailable. Do not fabricate values to fill the schema.
