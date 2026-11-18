@@ -178,7 +178,7 @@ class FilmTranslationService:
                     quality_template,
                     {
                         "CONTEXT_PROFILE_JSON": json.dumps(context, ensure_ascii=False),
-                        "SEGMENTS_JSON": json.dumps(current, ensure_ascii=False),
+                        "SEGMENTS_JSON": json.dumps(current_prompt_segments, ensure_ascii=False),
                         "TRANSLATION_JSON": json.dumps(
                             {"segments": translated_batch},
                             ensure_ascii=False,
