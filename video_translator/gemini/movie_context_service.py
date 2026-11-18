@@ -96,6 +96,13 @@ class MovieContextService:
         else:
             state = self._new_state(fingerprint)
 
+        if (
+            state.get("is_complete") is not True
+            and state.get("batch_segments") not in (None, batch_size)
+        ):
+            self._log("Kích thước chapter đã đổi; tạo checkpoint phân tích mới để tránh bỏ sót đoạn.")
+            state = self._new_state(fingerprint)
+
         profile = self._normalize_profile(state.get("profile"))
         processed = int(state.get("processed_segments", 0) or 0)
         processed = min(processed, len(segments))
