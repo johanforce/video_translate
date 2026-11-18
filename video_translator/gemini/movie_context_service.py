@@ -168,24 +168,50 @@ class MovieContextService:
                 "transcript_is_complete_input": len(batches) == 1,
                 "segments": self._prompt_segments(chunk),
             }
-            prompt = render_prompt(
-                analysis_template,
-                {
-                    "TRANSCRIPT_JSON": json.dumps(chapter_payload, ensure_ascii=False),
-                    "CONTEXT_PROFILE_JSON": json.dumps(profile, ensure_ascii=False),
-                },
+            chapter_signature = sha256_text(
+                config_signature
+                + json.dumps(chapter_payload, ensure_ascii=False, sort_keys=True)
+                + json.dumps(profile, ensure_ascii=False, sort_keys=True)
             )
-            self._log(
-                f"Gemini context chapter {batch_index + 1}/{len(batches)} "
-                f"(segments {chunk_start + 1}-{min(chunk_end, len(segments))})..."
-            )
-            response = self.client.generate_json(
-                prompt,
-                system_prompt,
-                cancel_event=cancel_event,
-            )
+            chapter_responses = state.setdefault("chapter_responses", {})
+            cached_chapter = chapter_responses.get(str(batch_index))
+            if (
+                isinstance(cached_chapter, dict)
+                and cached_chapter.get("signature") == chapter_signature
+                and isinstance(cached_chapter.get("response"), dict)
+            ):
+                self._log(
+                    f"Dùng cache phản hồi chapter {batch_index + 1}/{len(batches)}."
+                )
+                response = cached_chapter["response"]
+            else:
+                prompt = render_prompt(
+                    analysis_template,
+                    {
+                        "TRANSCRIPT_JSON": json.dumps(chapter_payload, ensure_ascii=False),
+                        "CONTEXT_PROFILE_JSON": json.dumps(profile, ensure_ascii=False),
+                    },
+                )
+                self._log(
+                    f"Gemini context chapter {batch_index + 1}/{len(batches)} "
+                    f"(segments {chunk_start + 1}-{min(chunk_end, len(segments))})..."
+                )
+                response = self.client.generate_json(
+                    prompt,
+                    system_prompt,
+                    cancel_event=cancel_event,
+                )
+                # Store the raw model response before merging it into the accumulated profile.
+                chapter_responses[str(batch_index)] = {
+                    "signature": chapter_signature,
+                    "response": response,
+                }
+                state["chapter_responses"] = chapter_responses
+                write_json_atomic(paths.context_json, state)
+
             profile = self._merge_profiles(profile, response)
             processed = min(chunk_end, len(segments))
+            chapter_responses.pop(str(batch_index), None)
             state.update(
                 {
                     "schema_version": 1,
@@ -198,6 +224,7 @@ class MovieContextService:
                     "total_segments": len(segments),
                     "is_complete": False,
                     "profile": profile,
+                    "chapter_responses": chapter_responses,
                 }
             )
             write_json_atomic(paths.context_json, state)
@@ -364,6 +391,7 @@ class MovieContextService:
             "total_segments": 0,
             "is_complete": False,
             "profile": _PROFILE_DEFAULTS,
+            "chapter_responses": {},
         }
 
     @staticmethod
