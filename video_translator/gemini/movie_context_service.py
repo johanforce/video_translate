@@ -138,9 +138,25 @@ class MovieContextService:
             saved_signature == config_signature
             or saved_signature in legacy_signatures
         )
+        existing_processed = min(
+            int(state.get("processed_segments", 0) or 0),
+            len(segments),
+        )
+        existing_profile = isinstance(state.get("profile"), dict)
+        if (
+            not signature_is_compatible
+            and existing_processed > 0
+            and existing_profile
+        ):
+            # Prompt wording may evolve, but accepted observations for the same
+            # transcript remain useful. Keep them and apply the new prompt only to
+            # the unprocessed tail instead of restarting the whole analysis.
+            self._log(
+                f"Prompt/config đã thay đổi; giữ lại {existing_processed} segment "
+                "đã phân tích và dùng prompt mới cho phần còn lại."
+            )
+            signature_is_compatible = True
         if not signature_is_compatible:
-            # Transcript or analysis prompt changed: old observations are no longer
-            # guaranteed to be valid, so start a new context checkpoint.
             state = self._new_state(fingerprint)
             saved_signature = config_signature
             saved_batch_size = batch_size
