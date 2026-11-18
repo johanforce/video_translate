@@ -52,6 +52,8 @@ Python desktop application for contextual Vietnamese film translation and dubbin
 - Tracks each stage, progress, errors, checkpoints and recent history.
 - Reconciles stage status with file hashes when a project is reopened.
 - Resume starts at the first incomplete stage; each service also checks its own per-chunk/per-batch cache.
+- Selecting a source video searches for its registered transcript/project, including after restarting the app. The registry is stored at `~/.video_translator/projects.json`; opening an existing transcript once registers older projects.
+- Gemini model selection is not part of the resumable context/translation cache signature. Completed chapters and batches remain reusable; the selected model handles only unfinished requests. Completed Gemini stages are not regenerated just because the model changed.
 - Changed transcript/context/translation/voice/render settings invalidate only dependent artifacts, not unrelated earlier stages.
 
 ## Requirements
