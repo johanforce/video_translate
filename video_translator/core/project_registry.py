@@ -72,6 +72,8 @@ class ProjectRegistry:
                 payload = read_json(candidate)
                 source_text = str(payload.get("source_video") or "").strip()
                 if not source_text:
+                    if candidate.name == f"{video.stem}.transcript.json":
+                        return candidate
                     continue
                 recorded_source = Path(source_text).expanduser()
                 try:
