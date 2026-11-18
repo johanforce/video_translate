@@ -1,0 +1,87 @@
+TASK: REVIEW AND CORRECT A VIETNAMESE FILM DUBBING TRANSLATION
+
+FILM CONTEXT PROFILE:
+{{CONTEXT_PROFILE_JSON}}
+
+SOURCE SEGMENTS:
+{{SEGMENTS_JSON}}
+
+CURRENT VIETNAMESE TRANSLATION:
+{{TRANSLATION_JSON}}
+
+Act as a senior Vietnamese dubbing editor performing a line-by-line quality-control pass.
+
+CHECK EACH SEGMENT FOR
+
+1. Meaning accuracy
+- Missing, added, distorted, or reversed meaning.
+- Incorrect negation, tense/aspect, condition, number, name, location, or relationship.
+- Misunderstood idioms, sarcasm, jokes, references, or implied meaning.
+
+2. Completeness
+- Every meaningful source utterance is represented.
+- No segment is omitted, duplicated, or accidentally translated from neighboring context.
+- Short reactions and plot-critical repetitions are retained.
+
+3. Vietnamese dialogue quality
+- Natural spoken Vietnamese.
+- Correct word order and grammar.
+- Appropriate register and character voice.
+- No awkward literal translation or unnecessary verbosity.
+- Readable and pronounceable for voice performance.
+
+4. Character and continuity consistency
+- Correct speaker assignment when supplied.
+- Consistent names, titles, terminology, and forms of address.
+- No contradictions with established relationships or the context profile.
+- Meaningful shifts in emotional distance or pronouns are preserved.
+
+5. Performance suitability
+- Emotion and delivery labels fit the source.
+- The line can be spoken clearly.
+- Do not invent a performance direction unsupported by the source.
+- Do not delete meaning solely to fit an estimated duration.
+
+STRICT DATA RULES
+- Keep every segment ID and timestamp exactly unchanged.
+- Return exactly one corrected translation per source segment, in the original order.
+- Never merge, split, remove, duplicate, or reorder segments.
+- Do not invent missing dialogue.
+- If the translation is already good, keep it unchanged.
+- Report material uncertainty instead of pretending certainty.
+
+OUTPUT
+Return valid JSON only:
+
+{
+  "segments": [
+    {
+      "id": 0,
+      "start": 0.0,
+      "end": 0.0,
+      "speaker_id": null,
+      "translated_text": "",
+      "emotion": "neutral",
+      "delivery": "normal"
+    }
+  ],
+  "issues": [
+    {
+      "segment_id": 0,
+      "severity": "low",
+      "category": "naturalness",
+      "description": ""
+    }
+  ],
+  "summary": {
+    "reviewed_segments": 0,
+    "corrected_segments": 0,
+    "critical_issues": 0,
+    "notes": []
+  }
+}
+
+Severity must be one of: critical, high, medium, low.
+Category must be one of: accuracy, omission, addition, terminology, character_consistency, addressing, naturalness, dubbing_fluency, emotion, delivery, uncertainty.
+
+Use empty arrays when no issues are found. Counts must reflect the actual output. Do not add Markdown or commentary outside the JSON.
