@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from video_translator.gemini.client import GeminiOutputLimitError
+from video_translator.gemini.context_compactor import compact_context_profile
 from video_translator.gemini.film_translation_service import FilmTranslationError, FilmTranslationService
 from video_translator.gemini.movie_context_service import MovieContextService
 from video_translator.gemini.project_paths import MovieProjectPaths
@@ -176,7 +177,7 @@ class GeminiServiceTests(unittest.TestCase):
                 service.run(transcript_path, batch_segments=40)
                 self.assertEqual(fake_client.calls, first_call_count)
 
-    def test_context_finalize_response_is_cached_after_crash(self) -> None:
+    def test_local_context_finalization_needs_no_extra_gemini_call(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             transcript_path = self._write_transcript(root)
@@ -499,7 +500,7 @@ class GeminiServiceTests(unittest.TestCase):
                 self.calls = 0
                 self.analyzed_ranges = []
 
-            def generate_json(self, prompt: str, system_instruction: str, cancel_event=None, debug_path=None):
+            def generate_json(self, prompt: str, system_instruction: str, cancel_event=None, debug_path=None, max_output_tokens=None):
                 self.calls += 1
                 if "INPUT TRANSCRIPT:\n" not in prompt:
                     return {}
@@ -749,6 +750,31 @@ class GeminiServiceTests(unittest.TestCase):
             self.assertTrue(completed["is_complete"])
             self.assertEqual(completed["pending_batches"], {})
 
+
+    def test_context_compactor_drops_evidence_and_uncertainty_metadata_for_translation(self) -> None:
+        compact = compact_context_profile(
+            {
+                "film_profile": {"genre": "Historical", "continuity_facts": ["Fact"]},
+                "characters": [{
+                    "character_id": "char_1",
+                    "name": "Qin",
+                    "evidence_segment_ids": [1, 2, 3],
+                    "confidence": "high",
+                    "speech_style": "Formal",
+                }],
+                "terminology": [{
+                    "source_term": "King",
+                    "vietnamese_term": "Đại vương",
+                    "evidence_segment_ids": [4],
+                    "confidence": "medium",
+                }],
+                "uncertainties": ["Unclear identity"],
+            }
+        )
+        self.assertEqual(compact["characters"][0]["character_id"], "char_1")
+        self.assertNotIn("evidence_segment_ids", compact["characters"][0])
+        self.assertNotIn("confidence", compact["characters"][0])
+        self.assertNotIn("uncertainties", compact)
 
     def test_compact_translation_rows_restore_defaults_and_sparse_performance(self) -> None:
         source = [
