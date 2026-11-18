@@ -5,8 +5,9 @@ from pathlib import Path
 
 from video_translator.core.pipeline_service import ProjectPipelineService
 from video_translator.core.project_manager import ProjectManager
-from video_translator.gemini.json_utils import sha256_file
+from video_translator.gemini.json_utils import sha256_file, sha256_text
 from video_translator.gemini.project_paths import MovieProjectPaths
+from video_translator.gemini.prompt_loader import load_prompt
 
 
 class PipelineStageCacheTests(unittest.TestCase):
@@ -29,19 +30,38 @@ class PipelineStageCacheTests(unittest.TestCase):
             encoding="utf-8",
         )
         paths = MovieProjectPaths.from_transcript(transcript_path)
+        context_signature = sha256_text(
+            sha256_file(transcript_path)
+            + "gemini-test"
+            + "180"
+            + load_prompt("system_prompt.txt")
+            + load_prompt("context_analysis.txt")
+            + load_prompt("context_finalize.txt")
+        )
         context = {
             "is_complete": True,
             "transcript_fingerprint": sha256_file(transcript_path),
+            "config_signature": context_signature,
             "model": "gemini-test",
             "batch_segments": 180,
             "profile": {"film_profile": {"genre": "Drama"}},
         }
         paths.context_json.write_text(json.dumps(context), encoding="utf-8")
+        translation_signature = sha256_text(
+            sha256_file(transcript_path)
+            + sha256_file(paths.context_json)
+            + "gemini-test"
+            + "30"
+            + load_prompt("system_prompt.txt")
+            + load_prompt("translation.txt")
+            + load_prompt("quality_control.txt")
+        )
         translation = {
             "is_complete": True,
             "source_transcript": str(transcript_path),
             "source_fingerprint": sha256_file(transcript_path),
             "context_fingerprint": sha256_file(paths.context_json),
+            "config_signature": translation_signature,
             "model": "gemini-test",
             "batch_size": 30,
             "segments": [
