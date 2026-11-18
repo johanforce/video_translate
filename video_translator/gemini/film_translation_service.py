@@ -318,8 +318,16 @@ class FilmTranslationService:
                     "end": source_end,
                     "speaker_id": candidate.get("speaker_id"),
                     "translated_text": translated_text.strip(),
-                    "emotion": emotion if emotion in _ALLOWED_EMOTIONS else "neutral",
-                    "delivery": delivery if delivery in _ALLOWED_DELIVERIES else "normal",
+                    "emotion": (
+                        emotion
+                        if isinstance(emotion, str) and emotion in _ALLOWED_EMOTIONS
+                        else "neutral"
+                    ),
+                    "delivery": (
+                        delivery
+                        if isinstance(delivery, str) and delivery in _ALLOWED_DELIVERIES
+                        else "normal"
+                    ),
                 }
             )
         return result
