@@ -166,7 +166,7 @@ class MovieContextService:
                 "first_segment_id": chunk[0].get("id"),
                 "last_segment_id": chunk[-1].get("id"),
                 "transcript_is_complete_input": len(batches) == 1,
-                "segments": chunk,
+                "segments": self._prompt_segments(chunk),
             }
             prompt = render_prompt(
                 analysis_template,
@@ -249,6 +249,16 @@ class MovieContextService:
         )
         self._log(f"Context Profile: {paths.context_json}")
         return paths.context_json
+
+    @staticmethod
+    def _prompt_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Exclude verbose word timings; Gemini needs dialogue-level context only."""
+        fields = ("id", "start", "end", "text", "speaker_id")
+        return [
+            {key: item[key] for key in fields if key in item}
+            for item in segments
+            if isinstance(item, dict)
+        ]
 
     @classmethod
     def _merge_profiles(cls, previous: dict[str, Any], incoming: Any) -> dict[str, Any]:
