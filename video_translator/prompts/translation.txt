@@ -24,7 +24,7 @@ INSTRUCTIONS
 8. Preserve meaningful interruptions, reactions, repetitions, and incomplete sentences.
 9. Do not add explanations, translator notes, sound effects, or stage directions that are not present in the source.
 10. Do not translate unintelligible/empty source text by guessing. Use an empty translated_text only when the source segment is explicitly empty or unintelligible.
-11. Keep IDs, timestamps, order, and segment count exactly unchanged.
+11. Keep every source ID exactly once and preserve the segment count. Do not generate or modify timestamps; the application restores timing from the original transcript.
 12. Previous and next context segments are not part of the requested output and must never be duplicated.
 
 EMOTION LABEL
@@ -44,8 +44,6 @@ Return only this JSON structure:
   "segments": [
     {
       "id": 0,
-      "start": 0.0,
-      "end": 0.0,
       "speaker_id": null,
       "translated_text": "",
       "emotion": "neutral",
@@ -54,13 +52,13 @@ Return only this JSON structure:
   ]
 }
 
-The example values above are placeholders. Replace them with the exact source IDs and timestamps. Do not include the example segment unless it exists in the input.
+The example values above are placeholders. Replace the ID with an exact source ID. Do not include the example segment unless it exists in the input.
 
 FINAL SELF-CHECK BEFORE RESPONDING
 - Same number of items as the current input batch.
 - Every input ID occurs exactly once.
-- IDs and timestamps exactly match the corresponding input.
-- Original order is preserved.
+- Every returned ID matches exactly one input segment.
+- Original order is preferred; the application matches results by ID and restores source order.
 - No context-only segment appears in the output.
 - Every meaningful utterance is translated.
 - Vietnamese is natural when read aloud.
