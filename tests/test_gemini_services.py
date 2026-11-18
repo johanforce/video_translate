@@ -796,6 +796,33 @@ class GeminiServiceTests(unittest.TestCase):
             ["Xin chào", "Tạm biệt"],
         )
 
+    def test_translation_allows_empty_text_and_skips_it_in_srt(self) -> None:
+        source = [
+            {"id": 247, "start": 10.0, "end": 11.0, "text": "Hello"},
+            {"id": 248, "start": 11.0, "end": 12.0, "text": "Unclear audio"},
+            {"id": 249, "start": 12.0, "end": 13.0, "text": "Goodbye"},
+        ]
+        response = [
+            {"id": 247, "translated_text": "Xin chào"},
+            {"id": 248, "translated_text": ""},
+            {"id": 249, "translated_text": "Tạm biệt"},
+        ]
+
+        validated = FilmTranslationService._validate_segments(
+            source, response, "test"
+        )
+        self.assertEqual([item["id"] for item in validated], [247, 248, 249])
+        self.assertEqual(validated[1]["translated_text"], "")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            srt_path = Path(temp_dir) / "skip.srt"
+            FilmTranslationService._write_translated_srt(srt_path, validated)
+            srt = srt_path.read_text(encoding="utf-8")
+            self.assertIn("Xin chào", srt)
+            self.assertIn("Tạm biệt", srt)
+            self.assertNotIn("Unclear audio", srt)
+            self.assertNotIn("00:00:11,000", srt)
+
     def test_translation_still_rejects_missing_or_duplicate_segment_ids(self) -> None:
         source = [
             {"id": 51, "start": 1.0, "end": 2.0, "text": "Hello"},
