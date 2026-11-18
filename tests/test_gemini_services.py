@@ -695,18 +695,64 @@ class GeminiServiceTests(unittest.TestCase):
             self.assertEqual(completed["pending_batches"], {})
 
 
-    def test_translation_rejects_timestamp_changes(self) -> None:
-        source = [{"id": 1, "start": 1.0, "end": 2.0, "text": "Hello"}]
+    def test_translation_restores_source_timestamps_when_gemini_changes_them(self) -> None:
+        source = [{"id": 51, "start": 12.345, "end": 13.678, "text": "Hello"}]
         result = [
             {
-                "id": 1,
-                "start": 1.1,
-                "end": 2.0,
+                "id": 51,
+                "start": 12.35,
+                "end": 13.7,
                 "translated_text": "Xin chào",
             }
         ]
-        with self.assertRaisesRegex(FilmTranslationError, "timestamp"):
-            FilmTranslationService._validate_segments(source, result, "test")
+
+        validated = FilmTranslationService._validate_segments(source, result, "test")
+
+        self.assertEqual(validated[0]["id"], 51)
+        self.assertEqual(validated[0]["start"], 12.345)
+        self.assertEqual(validated[0]["end"], 13.678)
+        self.assertEqual(validated[0]["translated_text"], "Xin chào")
+
+    def test_translation_does_not_require_gemini_to_return_timestamps(self) -> None:
+        source = [{"id": 51, "start": 12.345, "end": 13.678, "text": "Hello"}]
+        result = [{"id": 51, "translated_text": "Xin chào"}]
+
+        validated = FilmTranslationService._validate_segments(source, result, "test")
+
+        self.assertEqual(
+            (validated[0]["start"], validated[0]["end"]),
+            (12.345, 13.678),
+        )
+
+    def test_translation_matches_results_by_id_and_restores_source_order(self) -> None:
+        source = [
+            {"id": 51, "start": 1.0, "end": 2.0, "text": "Hello"},
+            {"id": 52, "start": 2.0, "end": 3.0, "text": "Goodbye"},
+        ]
+        result = [
+            {"id": 52, "translated_text": "Tạm biệt"},
+            {"id": 51, "translated_text": "Xin chào"},
+        ]
+
+        validated = FilmTranslationService._validate_segments(source, result, "test")
+
+        self.assertEqual([item["id"] for item in validated], [51, 52])
+        self.assertEqual(
+            [item["translated_text"] for item in validated],
+            ["Xin chào", "Tạm biệt"],
+        )
+
+    def test_translation_still_rejects_missing_or_duplicate_segment_ids(self) -> None:
+        source = [
+            {"id": 51, "start": 1.0, "end": 2.0, "text": "Hello"},
+            {"id": 52, "start": 2.0, "end": 3.0, "text": "Goodbye"},
+        ]
+        duplicate = [
+            {"id": 51, "translated_text": "Xin chào"},
+            {"id": 51, "translated_text": "Chào bạn"},
+        ]
+        with self.assertRaisesRegex(FilmTranslationError, "lặp ID"):
+            FilmTranslationService._validate_segments(source, duplicate, "test")
 
 
 if __name__ == "__main__":
