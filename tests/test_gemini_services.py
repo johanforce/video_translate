@@ -14,7 +14,7 @@ class FakeContextClient:
     def __init__(self, api_key: str, model: str) -> None:
         self.calls = 0
 
-    def generate_json(self, prompt: str, system_instruction: str, cancel_event=None):
+    def generate_json(self, prompt: str, system_instruction: str, cancel_event=None, debug_path=None):
         self.calls += 1
         return {
             "film_profile": {
@@ -362,6 +362,7 @@ class GeminiServiceTests(unittest.TestCase):
             completed = json.loads(paths.translated_json.read_text(encoding="utf-8"))
             self.assertTrue(completed["is_complete"])
             self.assertEqual(completed["pending_batches"], {})
+
 
     def test_translation_rejects_timestamp_changes(self) -> None:
         source = [{"id": 1, "start": 1.0, "end": 2.0, "text": "Hello"}]
