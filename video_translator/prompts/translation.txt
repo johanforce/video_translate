@@ -1,0 +1,68 @@
+TASK: TRANSLATE A TIMESTAMPED FILM DIALOGUE BATCH INTO NATURAL VIETNAMESE FOR DUBBING
+
+FILM CONTEXT PROFILE:
+{{CONTEXT_PROFILE_JSON}}
+
+PREVIOUS DIALOGUE (context only; do not output these segments):
+{{PREVIOUS_CONTEXT_JSON}}
+
+NEXT DIALOGUE (context only; do not output these segments):
+{{NEXT_CONTEXT_JSON}}
+
+CURRENT SOURCE SEGMENTS TO TRANSLATE:
+{{SEGMENTS_JSON}}
+
+INSTRUCTIONS
+
+1. Translate every current segment into natural Vietnamese suitable for film dubbing or voice-over.
+2. Use the complete film context profile to resolve character names, relationships, pronouns, terminology, recurring jokes, and story references.
+3. Use previous and next dialogue to understand continuity, but output only the current source segments.
+4. Respect the speaker identity supplied in the source. If it is missing or uncertain, return null for speaker_id rather than guessing.
+5. Preserve the intent, information, personality, emotional force, humor, sarcasm, and register of the original.
+6. Make dialogue easy to speak aloud. Prefer concise, natural spoken Vietnamese, but do not remove important meaning to shorten a line.
+7. Follow the profile's established names, titles, terminology, and forms of address. Do not vary them casually.
+8. Preserve meaningful interruptions, reactions, repetitions, and incomplete sentences.
+9. Do not add explanations, translator notes, sound effects, or stage directions that are not present in the source.
+10. Do not translate unintelligible/empty source text by guessing. Use an empty translated_text only when the source segment is explicitly empty or unintelligible.
+11. Keep IDs, timestamps, order, and segment count exactly unchanged.
+12. Previous and next context segments are not part of the requested output and must never be duplicated.
+
+EMOTION LABEL
+Choose one best-fit value:
+neutral, happy, sad, angry, fearful, surprised, sarcastic, humorous, romantic, disgusted, curious, reassuring, threatening, uncertain.
+
+DELIVERY LABEL
+Choose one best-fit value:
+normal, shouting, whispering, crying, laughing, breathless, trembling, singing, robotic, soft, emphatic.
+
+Do not over-label. If the source provides insufficient performance evidence, use neutral and normal.
+
+REQUIRED JSON OUTPUT
+Return only this JSON structure:
+
+{
+  "segments": [
+    {
+      "id": 0,
+      "start": 0.0,
+      "end": 0.0,
+      "speaker_id": null,
+      "translated_text": "",
+      "emotion": "neutral",
+      "delivery": "normal"
+    }
+  ]
+}
+
+The example values above are placeholders. Replace them with the exact source IDs and timestamps. Do not include the example segment unless it exists in the input.
+
+FINAL SELF-CHECK BEFORE RESPONDING
+- Same number of items as the current input batch.
+- Every input ID occurs exactly once.
+- IDs and timestamps exactly match the corresponding input.
+- Original order is preserved.
+- No context-only segment appears in the output.
+- Every meaningful utterance is translated.
+- Vietnamese is natural when read aloud.
+- Character voice, terminology, and pronouns follow the context profile.
+- JSON is valid and contains no extra keys.
