@@ -153,7 +153,10 @@ class MovieContextService:
         )
 
         for batch_index, chunk in enumerate(batches):
-            chunk_end = (batch_index + 1) * batch_size
+            # Compare with the actual end of the final partial chapter, not the
+            # nominal batch boundary; otherwise the final chapter is analyzed twice
+            # whenever a run resumes after its checkpoint was written.
+            chunk_end = min((batch_index + 1) * batch_size, len(segments))
             if chunk_end <= processed:
                 continue
             if cancel_event.is_set():
