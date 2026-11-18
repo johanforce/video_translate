@@ -1,0 +1,21 @@
+TASK: FINALIZE THE FILM CONTEXT PROFILE
+
+All transcript chapters have been analyzed in chronological order. The profile below is the accumulated evidence from the complete transcript.
+
+CURRENT CONTEXT PROFILE:
+{{CONTEXT_PROFILE_JSON}}
+
+TOTAL TRANSCRIPT SEGMENTS ANALYZED:
+{{SEGMENT_COUNT}}
+
+Review and consolidate the profile:
+- Merge duplicate characters, aliases, relationships, and terminology entries.
+- Keep stable character IDs and terminology already established.
+- Resolve contradictions only when transcript evidence supports a resolution.
+- Retain uncertain facts in uncertainties; do not fabricate certainty.
+- Keep the character addressing rules practical for Vietnamese dubbing.
+- Keep the profile concise and useful to a translator.
+- Set film_profile.is_partial to false because all supplied transcript segments have now been analyzed. This does not imply that the original film itself is complete if the source video was cut short.
+- Do not invent an ending, scene, or fact absent from the transcript.
+
+Return the exact JSON object structure required by the context-analysis prompt. Return valid JSON only.
