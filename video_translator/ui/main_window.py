@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from video_translator.config.settings import AppSettings
 from video_translator.core.models import DownloadProgress, TranscriptionProgress
 from video_translator.core.project_manager import ProjectManager
+from video_translator.core.project_registry import ProjectRegistry
 from video_translator.gemini.project_paths import MovieProjectPaths
 from video_translator.ui.download_worker import DownloadWorker
 from video_translator.ui.gemini_worker import GeminiWorker
@@ -224,6 +225,7 @@ class MainWindow(QMainWindow):
         self.video_input = QLineEdit()
         self.video_input.setPlaceholderText("Chọn video đã tải hoặc video có sẵn...")
         self.video_input.textChanged.connect(self._update_action_states)
+        self.video_input.editingFinished.connect(self._resolve_video_project)
         self.video_browse_button = QPushButton("Chọn video")
         self.video_browse_button.clicked.connect(self._browse_video)
         form.addRow("Video nguồn", self._row(self.video_input, self.video_browse_button))
@@ -503,8 +505,83 @@ class MainWindow(QMainWindow):
             "Video files (*.mp4 *.mkv *.mov *.avi *.webm *.m4v);;All files (*)",
         )
         if selected:
-            self.video_input.setText(selected)
+            video_path = Path(selected).expanduser().resolve()
+            self.video_input.setText(str(video_path))
+            self._attach_project_for_video(video_path)
             self._update_action_states()
+
+    def _resolve_video_project(self) -> None:
+        video_path = Path(self.video_input.text().strip()).expanduser()
+        if video_path.is_file():
+            self._attach_project_for_video(video_path.resolve())
+
+    def _find_project_for_video(self, video_path: Path) -> Path | None:
+        directories: list[Path] = []
+        for value in (
+            self.output_input.text().strip(),
+            str(video_path.parent),
+            str(self.settings.output_dir),
+            str(Path.home() / "Videos" / "VideoTranslator"),
+        ):
+            if value:
+                directory = Path(value).expanduser()
+                if directory not in directories:
+                    directories.append(directory)
+        return ProjectRegistry().find_for_video(
+            video_path,
+            tuple(directories),
+        )
+
+    @staticmethod
+    def _transcript_matches_video(transcript_path: Path, video_path: Path) -> bool:
+        try:
+            payload = json.loads(transcript_path.read_text(encoding="utf-8"))
+            source_text = str(payload.get("source_video") or "").strip()
+            if not source_text:
+                return transcript_path.name == f"{video_path.stem}.transcript.json"
+            recorded = Path(source_text).expanduser()
+            same_path = os.path.normcase(str(recorded.resolve())) == os.path.normcase(
+                str(video_path.resolve())
+            )
+            moved_same_name = (
+                not recorded.is_file()
+                and recorded.name.casefold() == video_path.name.casefold()
+                and transcript_path.name == f"{video_path.stem}.transcript.json"
+            )
+            return same_path or moved_same_name
+        except (OSError, ValueError, TypeError):
+            return False
+
+    def _attach_project_for_video(self, video_path: Path) -> bool:
+        transcript = self._find_project_for_video(video_path)
+        if transcript is not None:
+            self.output_input.setText(str(transcript.parent))
+            self.transcript_input.setText(str(transcript))
+            self.project_transcript_input.setText(str(transcript))
+            self._set_project_source(transcript)
+            self._append_log(
+                f"[RESUME] Đã tìm thấy project theo video nguồn: {transcript}"
+            )
+            return True
+
+        current_text = self.transcript_input.text().strip()
+        current = Path(current_text).expanduser() if current_text else None
+        if current is not None and current.is_file() and not self._transcript_matches_video(
+            current, video_path
+        ):
+            self.transcript_input.clear()
+            self.project_transcript_input.clear()
+            self.translation_input.clear()
+            self.render_translation_input.clear()
+            self.project_manager = None
+            self.context_path = None
+            self._context_ready = False
+            self._append_log(
+                "Video nguồn khác project đang mở; đã bỏ liên kết transcript cũ để tránh dùng nhầm dữ liệu."
+            )
+        self._refresh_context_status()
+        self._refresh_project()
+        return False
 
     def _browse_transcript(self) -> None:
         selected, _ = QFileDialog.getOpenFileName(
@@ -751,6 +828,29 @@ class MainWindow(QMainWindow):
         if video_path is not None and not video_path.is_file():
             video_path = None
         video_url = self.url_input.text().strip()
+
+        # Selecting only the original video must still reopen its existing project.
+        if video_path is not None:
+            matching_transcript = self._find_project_for_video(video_path)
+            transcript_matches = (
+                transcript_path is not None
+                and self._transcript_matches_video(transcript_path, video_path)
+            )
+            if matching_transcript is not None:
+                transcript_path = matching_transcript
+                self.output_input.setText(str(matching_transcript.parent))
+                self.transcript_input.setText(str(matching_transcript))
+                self.project_transcript_input.setText(str(matching_transcript))
+                self._set_project_source(matching_transcript)
+            elif not transcript_matches:
+                transcript_path = None
+                self.transcript_input.clear()
+                self.project_transcript_input.clear()
+                self.project_manager = None
+                self.context_path = None
+                self._context_ready = False
+                self._refresh_context_status()
+                self._refresh_project()
 
         if transcript_path is None and video_path is None and not video_url:
             QMessageBox.warning(
@@ -1101,6 +1201,9 @@ class MainWindow(QMainWindow):
 
     def _set_project_source(self, transcript_path: Path) -> None:
         try:
+            transcript_path = transcript_path.expanduser().resolve()
+            self.output_input.setText(str(transcript_path.parent))
+            ProjectRegistry().register(transcript_path)
             self.project_manager = ProjectManager(transcript_path)
             paths = MovieProjectPaths.from_transcript(transcript_path)
             self.project_transcript_input.setText(str(transcript_path))
@@ -1181,16 +1284,8 @@ class MainWindow(QMainWindow):
             except (OSError, ValueError):
                 translation_state = {}
 
-        gemini_model = (
-            translation.get("model")
-            or context.get("model")
-            or translation_state.get("model")
-            or context_state.get("model")
-        )
-        if gemini_model:
-            index = self.gemini_model_combo.findData(str(gemini_model))
-            if index >= 0:
-                self.gemini_model_combo.setCurrentIndex(index)
+        # Keep the currently selected Gemini model. Project restoration should
+        # restore progress/settings, not silently override a model the user chose.
 
         batch_size = (
             translation.get("batch_size")
