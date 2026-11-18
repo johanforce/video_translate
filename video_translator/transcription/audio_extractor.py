@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import tempfile
 import threading
 from pathlib import Path
 from typing import Callable
@@ -33,8 +34,7 @@ class AudioExtractor:
 
         if not source.is_file():
             raise AudioExtractionError(f"Không tìm thấy video: {source}")
-        if not target.parent.exists():
-            target.parent.mkdir(parents=True, exist_ok=True)
+        target.parent.mkdir(parents=True, exist_ok=True)
 
         command = [
             "ffmpeg",
@@ -59,37 +59,40 @@ class AudioExtractor:
             str(target),
         ]
         self._log("FFmpeg: đang trích xuất audio mono 16 kHz...")
-        try:
-            process = subprocess.Popen(
-                command,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
-        except FileNotFoundError as exc:
-            raise AudioExtractionError(
-                "Không tìm thấy FFmpeg. Hãy cài FFmpeg và thêm thư mục bin vào PATH."
-            ) from exc
-        except OSError as exc:
-            raise AudioExtractionError(f"Không thể khởi chạy FFmpeg: {exc}") from exc
 
-        while process.poll() is None:
-            if cancel_event.wait(0.2):
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
-                raise TranscriptionCancelledError("Đã hủy trích xuất audio.")
+        # A temporary file prevents a full stderr pipe from blocking FFmpeg.
+        with tempfile.TemporaryFile(mode="w+b") as stderr_file:
+            try:
+                process = subprocess.Popen(
+                    command,
+                    stdout=subprocess.DEVNULL,
+                    stderr=stderr_file,
+                )
+            except FileNotFoundError as exc:
+                raise AudioExtractionError(
+                    "Không tìm thấy FFmpeg. Hãy cài FFmpeg và thêm thư mục bin vào PATH."
+                ) from exc
+            except OSError as exc:
+                raise AudioExtractionError(f"Không thể khởi chạy FFmpeg: {exc}") from exc
 
-        stderr = process.stderr.read() if process.stderr else ""
+            while process.poll() is None:
+                if cancel_event.wait(0.2):
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+                    raise TranscriptionCancelledError("Đã hủy trích xuất audio.")
+
+            stderr_file.seek(0)
+            stderr = stderr_file.read().decode("utf-8", errors="replace")
+
         if process.returncode != 0:
+            detail = stderr.strip()[-2000:]
             raise AudioExtractionError(
                 "FFmpeg không trích xuất được audio. "
-                + (stderr.strip()[-2000:] if stderr.strip() else "Video có thể không có track audio.")
+                + (detail if detail else "Video có thể không có track audio.")
             )
         if not target.is_file() or target.stat().st_size <= 44:
             raise AudioExtractionError(
