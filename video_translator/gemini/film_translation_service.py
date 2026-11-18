@@ -58,6 +58,10 @@ class FilmTranslationService:
         cancel_event = cancel_event or threading.Event()
         paths = MovieProjectPaths.from_transcript(transcript_path)
         transcript = read_json(paths.transcript_json)
+        if transcript.get("is_complete") is False:
+            raise FilmTranslationError(
+                "Whisper transcript còn dang dở. Hãy hoàn tất nhận diện trước khi dịch."
+            )
         context_envelope = read_json(context_path)
         context = context_envelope.get("profile")
         if not isinstance(context, dict):
