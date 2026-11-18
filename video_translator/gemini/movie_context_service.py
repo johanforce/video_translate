@@ -99,6 +99,21 @@ class MovieContextService:
         profile = self._normalize_profile(state.get("profile"))
         processed = int(state.get("processed_segments", 0) or 0)
         processed = min(processed, len(segments))
+        if (
+            state.get("is_complete") is True
+            and processed == len(segments)
+            and isinstance(state.get("profile"), dict)
+        ):
+            self._emit(
+                TranscriptionProgress(
+                    100,
+                    "Context Profile đã hoàn tất; không cần gọi Gemini lại.",
+                    len(segments),
+                )
+            )
+            self._log(f"Đã dùng lại Context Profile: {paths.context_json}")
+            return paths.context_json
+
         system_prompt = load_prompt("system_prompt.txt")
         analysis_template = load_prompt("context_analysis.txt")
 
@@ -121,7 +136,7 @@ class MovieContextService:
                 "chapter_count": len(batches),
                 "first_segment_id": chunk[0].get("id"),
                 "last_segment_id": chunk[-1].get("id"),
-                "transcript_is_complete_input": True,
+                "transcript_is_complete_input": len(batches) == 1,
                 "segments": chunk,
             }
             prompt = render_prompt(
@@ -140,7 +155,7 @@ class MovieContextService:
                 system_prompt,
                 cancel_event=cancel_event,
             )
-            profile = self._normalize_profile(response)
+            profile = self._merge_profiles(profile, response)
             processed = min(chunk_end, len(segments))
             state.update(
                 {
@@ -202,6 +217,88 @@ class MovieContextService:
         )
         self._log(f"Context Profile: {paths.context_json}")
         return paths.context_json
+
+    @classmethod
+    def _merge_profiles(cls, previous: dict[str, Any], incoming: Any) -> dict[str, Any]:
+        """Merge chapter observations instead of dropping facts from earlier chapters."""
+        old = cls._normalize_profile(previous)
+        new = cls._normalize_profile(incoming)
+
+        film = dict(old["film_profile"])
+        for key, value in new["film_profile"].items():
+            if key == "continuity_facts" and isinstance(value, list):
+                film[key] = cls._unique_items(
+                    list(film.get(key, [])) + value
+                )
+            elif value not in ("", None, [], {}):
+                film[key] = value
+        old["film_profile"] = film
+
+        old["characters"] = cls._merge_objects(
+            old.get("characters", []), new.get("characters", []), ("character_id", "name")
+        )
+        old["relationships"] = cls._unique_items(
+            list(old.get("relationships", [])) + list(new.get("relationships", []))
+        )
+        old["terminology"] = cls._merge_objects(
+            old.get("terminology", []), new.get("terminology", []), ("source_term",)
+        )
+        old["uncertainties"] = cls._unique_items(
+            list(old.get("uncertainties", [])) + list(new.get("uncertainties", []))
+        )
+
+        style = dict(old["style_guide"])
+        for key, value in new["style_guide"].items():
+            if isinstance(value, list):
+                style[key] = cls._unique_items(list(style.get(key, [])) + value)
+            elif value not in ("", None, [], {}):
+                style[key] = value
+        old["style_guide"] = style
+        return cls._normalize_profile(old)
+
+    @staticmethod
+    def _item_key(item: Any, fields: tuple[str, ...]) -> str:
+        if isinstance(item, dict):
+            for field in fields:
+                value = item.get(field)
+                if isinstance(value, str) and value.strip():
+                    return f"{field}:{value.strip().casefold()}"
+        return json.dumps(item, ensure_ascii=False, sort_keys=True, default=str)
+
+    @classmethod
+    def _merge_objects(
+        cls,
+        previous: Any,
+        incoming: Any,
+        key_fields: tuple[str, ...],
+    ) -> list[Any]:
+        result: list[Any] = []
+        positions: dict[str, int] = {}
+        for item in list(previous or []) + list(incoming or []):
+            key = cls._item_key(item, key_fields)
+            if key in positions and isinstance(item, dict) and isinstance(result[positions[key]], dict):
+                merged = dict(result[positions[key]])
+                for field, value in item.items():
+                    if isinstance(value, list):
+                        merged[field] = cls._unique_items(list(merged.get(field, [])) + value)
+                    elif value not in ("", None, [], {}):
+                        merged[field] = value
+                result[positions[key]] = merged
+            else:
+                positions[key] = len(result)
+                result.append(item)
+        return result
+
+    @staticmethod
+    def _unique_items(items: list[Any]) -> list[Any]:
+        unique: list[Any] = []
+        seen: set[str] = set()
+        for item in items:
+            key = json.dumps(item, ensure_ascii=False, sort_keys=True, default=str)
+            if key not in seen:
+                seen.add(key)
+                unique.append(item)
+        return unique
 
     @staticmethod
     def _new_state(fingerprint: str) -> dict[str, Any]:
