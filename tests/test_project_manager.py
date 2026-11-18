@@ -134,6 +134,24 @@ class ProjectManagerTests(unittest.TestCase):
             )
             self.assertEqual(manager.next_incomplete_stage(), "transcription")
 
+    def test_stage_settings_are_persisted_before_work_starts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            transcript = root / "film.transcript.json"
+            transcript.write_text(json.dumps({"segments": []}), encoding="utf-8")
+            manager = ProjectManager(transcript)
+            manager.start_stage(
+                "tts",
+                voice_id="voice-123",
+                speed=1.2,
+            )
+
+            reopened = ProjectManager(transcript)
+            stage = reopened.state["stages"]["tts"]
+            self.assertEqual(stage["status"], "interrupted")
+            self.assertEqual(stage["voice_id"], "voice-123")
+            self.assertEqual(stage["speed"], 1.2)
+
     def test_running_stage_becomes_interrupted_after_reopen(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
