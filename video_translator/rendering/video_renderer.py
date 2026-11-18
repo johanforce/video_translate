@@ -97,18 +97,22 @@ class VideoRenderer:
             if isinstance(stream, dict)
         )
 
+        source_video_fingerprint = sha256_file(source_video)
+        translation_fingerprint = sha256_file(translation_path)
+        tts_manifest_fingerprint = sha256_file(manifest_path)
+        subtitle_fingerprint = sha256_file(subtitle_path) if subtitle_path.is_file() else ""
         signature = sha256_text(
-            sha256_file(source_video)
-            + sha256_file(translation_path)
-            + sha256_file(subtitle_path) if subtitle_path.is_file()
-            else sha256_file(source_video) + sha256_file(translation_path)
-        )
-        signature = sha256_text(
-            signature
-            + sha256_file(manifest_path)
-            + subtitle_mode
-            + original_audio_mode
-            + "h264-crf18-aac192k"
+            "|".join(
+                (
+                    source_video_fingerprint,
+                    translation_fingerprint,
+                    tts_manifest_fingerprint,
+                    subtitle_fingerprint,
+                    subtitle_mode,
+                    original_audio_mode,
+                    "h264-crf18-aac192k",
+                )
+            )
         )
         if output.is_file() and output.stat().st_size > 1024 and metadata_path.is_file():
             try:
@@ -236,6 +240,10 @@ class VideoRenderer:
             "schema_version": 1,
             "render_signature": signature,
             "output_signature": sha256_file(output),
+            "source_video_fingerprint": source_video_fingerprint,
+            "translation_fingerprint": translation_fingerprint,
+            "tts_manifest_fingerprint": tts_manifest_fingerprint,
+            "subtitle_fingerprint": subtitle_fingerprint,
             "source_video": str(source_video),
             "translated_json": str(translation_path),
             "translated_srt": str(subtitle_path),
