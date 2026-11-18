@@ -18,9 +18,12 @@ Python desktop application for contextual Vietnamese film translation and dubbin
 - Restart skips chunks whose source/model/language fingerprints still match.
 
 ### v0.3 — Movie Context
-- Gemini analyzes the transcript chapter by chapter.
+- Gemini analyzes the transcript chapter by chapter (default 120 segments when translation batches are 30).
 - Builds a persistent profile of the story, characters, relationships, Vietnamese forms of address, terminology, continuity facts and uncertainties.
-- Saves the profile after each chapter.
+- Saves the profile after each accepted chapter/subchapter.
+- If Gemini reaches `MAX_TOKENS`, the application automatically bisects that chapter and retries smaller ranges; each accepted subchapter is checkpointed before continuing.
+- Context output is incremental: the prompt asks Gemini to report only new or materially updated facts, not repeat the entire accumulated profile.
+- Changing Gemini model or reducing chapter size keeps the already-processed segment count/profile. Only the unfinished tail is sent again.
 - A matching completed profile is reused without another Gemini request.
 
 ### v0.4 — Film Translation
@@ -53,6 +56,7 @@ Python desktop application for contextual Vietnamese film translation and dubbin
 - Reconciles stage status with file hashes when a project is reopened.
 - Resume starts at the first incomplete stage; each service also checks its own per-chunk/per-batch cache.
 - Selecting a source video searches for its registered transcript/project, including after restarting the app. The registry is stored at `~/.video_translator/projects.json`; opening an existing transcript once registers older projects.
+- Context chapter size is four times the translation batch setting (minimum 40 segments); with the default batch size of 30, the initial chapter size is 120 segments. Oversized responses are split further automatically.
 - Gemini model selection is not part of the resumable context/translation cache signature. Completed chapters and batches remain reusable; the selected model handles only unfinished requests. Completed Gemini stages are not regenerated just because the model changed.
 - Changed transcript/context/translation/voice/render settings invalidate only dependent artifacts, not unrelated earlier stages.
 
