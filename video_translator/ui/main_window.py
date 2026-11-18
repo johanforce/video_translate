@@ -213,6 +213,7 @@ class MainWindow(QMainWindow):
 
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText("Dán link YouTube hoặc Bilibili...")
+        self.url_input.textChanged.connect(self._update_action_states)
         form.addRow("Video URL", self.url_input)
 
         self.output_input = QLineEdit(str(self.settings.output_dir))
@@ -222,12 +223,14 @@ class MainWindow(QMainWindow):
 
         self.video_input = QLineEdit()
         self.video_input.setPlaceholderText("Chọn video đã tải hoặc video có sẵn...")
+        self.video_input.textChanged.connect(self._update_action_states)
         self.video_browse_button = QPushButton("Chọn video")
         self.video_browse_button.clicked.connect(self._browse_video)
         form.addRow("Video nguồn", self._row(self.video_input, self.video_browse_button))
 
         self.transcript_input = QLineEdit()
         self.transcript_input.setPlaceholderText("Chọn hoặc tạo transcript JSON...")
+        self.transcript_input.textChanged.connect(self._update_action_states)
         self.transcript_browse_button = QPushButton("Chọn JSON")
         self.transcript_browse_button.clicked.connect(self._browse_transcript)
         form.addRow(
