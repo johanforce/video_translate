@@ -546,11 +546,12 @@ class GeminiServiceTests(unittest.TestCase):
                 + load_prompt("context_analysis.txt")
                 + load_prompt("context_finalize.txt")
             )
+            # Simulate a saved project created with the previous longer prompt.
             legacy_signature = sha256_text(
                 sha256_file(transcript_path)
                 + old_model
                 + str(old_batch_size)
-                + prompt_signature
+                + "previous context prompt revision"
             )
             paths.context_json.write_text(
                 json.dumps({
