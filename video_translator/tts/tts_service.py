@@ -10,7 +10,11 @@ from video_translator.core.errors import VideoTranslatorError
 from video_translator.core.models import TranscriptionProgress
 from video_translator.gemini.json_utils import read_json, sha256_text, write_json_atomic
 from video_translator.gemini.project_paths import MovieProjectPaths
-from video_translator.tts.vieneu_client import LogCallback, VieNeuClient
+from video_translator.tts.vieneu_client import (
+    LogCallback,
+    VieNeuClient,
+    VieNeuJobFailedError,
+)
 
 
 ProgressCallback = Callable[[TranscriptionProgress], None]
@@ -154,16 +158,22 @@ class VieNeuTTSService:
 
             if job_id:
                 # The service client can resume polling a previously accepted job.
-                audio_path, metadata = self._resume_job(
-                    job_id=job_id,
-                    segment_id=segment_id,
-                    request_key=request_key,
-                    voice_id=voice_id,
-                    speed=speed,
-                    output_dir=paths.tts_dir,
-                    cancel_event=cancel_event,
-                    log_callback=self.log_callback,
-                )
+                try:
+                    audio_path, metadata = self.client.resume_segment(
+                        job_id=job_id,
+                        segment_id=segment_id,
+                        request_key=request_key,
+                        voice_id=voice_id,
+                        speed=speed,
+                        output_dir=paths.tts_dir,
+                        cancel_event=cancel_event,
+                        log_callback=self.log_callback,
+                    )
+                except VieNeuJobFailedError as exc:
+                    entry["status"] = "failed"
+                    entry["last_error"] = str(exc)
+                    write_json_atomic(paths.tts_manifest, manifest)
+                    raise
             else:
                 audio_path, metadata = self.client.synthesize_segment(
                     text=text,
@@ -174,6 +184,9 @@ class VieNeuTTSService:
                     output_dir=paths.tts_dir,
                     cancel_event=cancel_event,
                     log_callback=self.log_callback,
+                    job_callback=lambda job_id, response, sid=segment_id, ent=entry: self._save_job_checkpoint(
+                        paths.tts_manifest, manifest, sid, ent, job_id, response
+                    ),
                 )
 
             entries[str(segment_id)] = {
@@ -203,23 +216,24 @@ class VieNeuTTSService:
         )
         return paths.tts_manifest, completed, total
 
-    def _resume_job(
-        self,
-        job_id: str,
+    @staticmethod
+    def _save_job_checkpoint(
+        manifest_path: Path,
+        manifest: dict[str, Any],
         segment_id: int,
-        request_key: str,
-        voice_id: str,
-        speed: float,
-        output_dir: Path,
-        cancel_event: threading.Event,
-        log_callback: LogCallback | None,
-    ) -> tuple[Path, dict[str, Any]]:
-        # Submit again with the stable idempotency key. The API returns the original job
-        # or its completed cache result, avoiding duplicate billing after an app restart.
-        raise TTSServiceError(
-            f"Segment {segment_id} có job {job_id} đã nhận trước đó nhưng chưa có audio. "
-            "Tác vụ sẽ được phục hồi ở lần chạy kế tiếp sau khi hoàn thiện resume polling."
-        )
+        entry: dict[str, Any],
+        job_id: str,
+        response: dict[str, Any],
+    ) -> None:
+        entry["job_id"] = job_id
+        entry["status"] = str(response.get("status") or "queued")
+        entry["job_response"] = {
+            key: response.get(key)
+            for key in ("status", "duration", "audioUrlExpiresIn")
+            if response.get(key) is not None
+        }
+        manifest.setdefault("segments", {})[str(segment_id)] = entry
+        write_json_atomic(manifest_path, manifest)
 
     def _emit(self, progress: TranscriptionProgress) -> None:
         if self.progress_callback:
