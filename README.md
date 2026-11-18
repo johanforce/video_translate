@@ -30,7 +30,7 @@ Python desktop application for contextual Vietnamese film translation and dubbin
 - Translates batches using the film profile and neighboring dialogue.
 - Natural spoken Vietnamese, with character voice and performance metadata.
 - Quality control runs separately for every batch.
-- Source IDs and timestamps are validated before accepting output.
+- Source segment IDs are validated and matched by ID; timestamps are always restored from the original Whisper transcript, so Gemini cannot alter the dubbing timeline.
 - Translation response is checkpointed immediately, before QC. If Gemini fails during QC, restart reuses the translation and retries only QC.
 - Exports Vietnamese JSON, SRT and a quality report.
 
