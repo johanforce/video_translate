@@ -201,6 +201,7 @@ class ProjectPipelineService:
             ),
             source_video=str(current_video),
             model=whisper_model,
+            requested_language="auto" if source_language is None else source_language,
         )
         if transcription_result is not None:
             generated_transcript = Path(transcription_result[0]).resolve()
@@ -232,6 +233,7 @@ class ProjectPipelineService:
                 cancel_event=cancel_event,
             ),
             model=gemini_model,
+            batch_segments=max(40, int(translation_batch_size) * 6),
         )
 
         # 3. Contextual translation and line-by-line QC.
@@ -249,6 +251,7 @@ class ProjectPipelineService:
                 cancel_event=cancel_event,
             ),
             model=gemini_model,
+            batch_size=int(translation_batch_size),
         )
 
         # Restore the last VieNeu configuration from its manifest if the app was
