@@ -103,6 +103,18 @@ class AudioTimelineBuilder:
         )
 
         output_dir = manifest_path.parent
+        timeline_path = output_dir / "timeline.json"
+        voice_wav = output_dir / "narration.wav"
+        if timeline_path.is_file() and voice_wav.is_file() and voice_wav.stat().st_size > 44:
+            try:
+                cached_timeline = read_json(timeline_path)
+                if cached_timeline.get("signature") == signature:
+                    self._emit(100, "Dùng lại cache timeline thuyết minh.", len(speech_segments))
+                    self._log(f"Đã dùng cache narration: {voice_wav}")
+                    return voice_wav, timeline_path
+            except (ValueError, OSError):
+                pass
+
         prepared_dir = output_dir / "prepared"
         prepared_dir.mkdir(parents=True, exist_ok=True)
         prepared_cache_path = prepared_dir / "prepared_manifest.json"
@@ -250,7 +262,6 @@ class AudioTimelineBuilder:
             raise AudioTimelineError("Đã hủy ghép timeline audio.")
 
         mix_raw = output_dir / "narration_mix.f32.tmp"
-        voice_wav = output_dir / "narration.wav"
         voice_wav_tmp = output_dir / "narration.wav.tmp"
         mix = np.memmap(mix_raw, dtype=np.float32, mode="w+", shape=(total_samples,))
         mix[:] = 0.0
@@ -303,6 +314,7 @@ class AudioTimelineBuilder:
                 "-f", "f32le", "-ar", str(sample_rate), "-ac", "1",
                 "-i", str(mix_raw),
                 "-c:a", "pcm_s16le",
+                "-f", "wav",
                 "-progress", "pipe:1", "-nostats",
                 str(voice_wav_tmp),
             ],
