@@ -533,6 +533,7 @@ class MainWindow(QMainWindow):
         if selected:
             self.translation_input.setText(selected)
             self.render_translation_input.setText(selected)
+            self._set_project_from_translation(Path(selected))
             self._update_action_states()
 
     def _browse_render_translation(self) -> None:
@@ -971,8 +972,31 @@ class MainWindow(QMainWindow):
     def _set_project_source(self, transcript_path: Path) -> None:
         try:
             self.project_manager = ProjectManager(transcript_path)
+            paths = MovieProjectPaths.from_transcript(transcript_path)
             self.project_transcript_input.setText(str(transcript_path))
             self.transcript_input.setText(str(transcript_path))
+            if paths.context_json.is_file():
+                self.context_path = paths.context_json
+                try:
+                    context_state = json.loads(paths.context_json.read_text(encoding="utf-8"))
+                    self._context_ready = context_state.get("is_complete") is True
+                except (OSError, ValueError):
+                    self._context_ready = False
+            else:
+                self.context_path = None
+                self._context_ready = False
+            if paths.translated_json.is_file():
+                self.translation_input.setText(str(paths.translated_json))
+                self.render_translation_input.setText(str(paths.translated_json))
+            source_video = Path("")
+            try:
+                transcript_data = json.loads(transcript_path.read_text(encoding="utf-8"))
+                source_video = Path(str(transcript_data.get("source_video", ""))).expanduser()
+            except (OSError, ValueError):
+                pass
+            if source_video.is_file():
+                self.video_input.setText(str(source_video))
+            self._refresh_context_status()
             self._refresh_project()
             self._update_action_states()
         except Exception as exc:
