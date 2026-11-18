@@ -414,11 +414,21 @@ class ProjectPipelineService:
                 )
             if stage == "transcription":
                 transcript = read_json(manager.paths.transcript_json)
-                requested = "auto" if source_language is None else source_language
+                requested = (source_language or "auto").strip().lower()
                 actual_requested = str(transcript.get("requested_language") or "auto")
+                source_video = Path(
+                    str(transcript.get("source_video", ""))
+                ).expanduser()
+                if not source_video.is_file():
+                    return False
+                expected_signature = sha256_text(
+                    f"{sha256_file(source_video)}|{whisper_model}|{requested}|240|"
+                    "mono16k-pcm|word-timestamps-v1"
+                )
                 return (
                     transcript.get("model") == whisper_model
                     and actual_requested == requested
+                    and transcript.get("transcription_signature") == expected_signature
                 )
         except (OSError, ValueError, TypeError):
             return False
