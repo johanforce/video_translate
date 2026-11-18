@@ -29,6 +29,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.settings = AppSettings.load()
         self.worker: DownloadWorker | TranscriptionWorker | None = None
+        self._busy = False
         self.setWindowTitle("VideoTranslator — Vietnamese Film Dubbing")
         self.resize(880, 700)
         self._build_ui()
@@ -369,6 +370,7 @@ class MainWindow(QMainWindow):
         self._set_busy(False)
 
     def _set_busy(self, busy: bool) -> None:
+        self._busy = busy
         for widget in (
             self.url_input,
             self.output_input,
@@ -384,8 +386,5 @@ class MainWindow(QMainWindow):
         self._update_transcribe_enabled()
 
     def _update_transcribe_enabled(self) -> None:
-        if self.worker and self.worker.isRunning():
-            self.transcribe_button.setEnabled(False)
-            return
         video_path = Path(self.video_input.text().strip()).expanduser()
-        self.transcribe_button.setEnabled(video_path.is_file())
+        self.transcribe_button.setEnabled(not self._busy and video_path.is_file())
