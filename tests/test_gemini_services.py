@@ -650,6 +650,60 @@ class GeminiServiceTests(unittest.TestCase):
             self.assertIn("00:00:00,250 --> 00:00:01,750", srt)
             self.assertIn("Đừng đi!", srt)
 
+    def test_translation_keeps_completed_batches_after_prompt_schema_change(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            transcript_path = self._write_transcript(root)
+            paths = MovieProjectPaths.from_transcript(transcript_path)
+            paths.context_json.write_text(
+                json.dumps({
+                    "is_complete": True,
+                    "profile": {"film_profile": {"genre": "Drama"}},
+                }),
+                encoding="utf-8",
+            )
+            source_fingerprint = sha256_file(transcript_path)
+            context_fingerprint = sha256_file(paths.context_json)
+            accepted_segment = {
+                "id": 1,
+                "start": 0.25,
+                "end": 1.75,
+                "speaker_id": "char_1",
+                "translated_text": "Đừng đi!",
+            }
+            paths.translated_json.write_text(
+                json.dumps({
+                    "config_signature": "old-prompt-signature",
+                    "source_fingerprint": source_fingerprint,
+                    "context_fingerprint": context_fingerprint,
+                    "batch_size": 10,
+                    "model": "gemini-3.6-flash",
+                    "segments": [accepted_segment],
+                    "issues": [{"segment_id": 1, "severity": "low"}],
+                    "pending_batches": {
+                        "2-2": {"translation": [{"id": 2, "translated_text": "stale"}]}
+                    },
+                    "is_complete": False,
+                }),
+                encoding="utf-8",
+            )
+
+            migrated = FilmTranslationService._load_or_create_state(
+                paths,
+                signature="new-prompt-signature",
+                source_fingerprint=source_fingerprint,
+                context_fingerprint=context_fingerprint,
+                batch_size=10,
+                prompt_signature="new prompt schema",
+                current_model="gemini-3.8-flash",
+            )
+
+            self.assertEqual(migrated["segments"], [accepted_segment])
+            self.assertEqual(migrated["issues"], [{"segment_id": 1, "severity": "low"}])
+            self.assertEqual(migrated["pending_batches"], {})
+            self.assertEqual(migrated["config_signature"], "new-prompt-signature")
+            self.assertEqual(migrated["model"], "gemini-3.8-flash")
+
     def test_translation_reuses_translation_cache_after_qc_api_error(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
