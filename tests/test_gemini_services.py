@@ -92,6 +92,47 @@ class FakeTranslationClient:
         }
 
 
+class FakeRecoverableTranslationClient:
+    def __init__(self, api_key: str, model: str) -> None:
+        self.translation_calls = 0
+        self.qc_calls = 0
+        self.fail_qc_once = True
+        self.translated = [
+            {
+                "id": 1,
+                "start": 0.25,
+                "end": 1.75,
+                "speaker_id": "char_1",
+                "translated_text": "Đừng đi!",
+                "emotion": "fearful",
+                "delivery": "shouting",
+            },
+            {
+                "id": 2,
+                "start": 2.0,
+                "end": 4.5,
+                "speaker_id": "char_1",
+                "translated_text": "Con vẫn chưa nói xong.",
+                "emotion": "sad",
+                "delivery": "soft",
+            },
+        ]
+
+    def generate_json(self, prompt: str, system_instruction: str, cancel_event=None):
+        if "TASK: TRANSLATE A TIMESTAMPED FILM DIALOGUE BATCH" in prompt:
+            self.translation_calls += 1
+            return {"segments": self.translated}
+        self.qc_calls += 1
+        if self.fail_qc_once:
+            self.fail_qc_once = False
+            raise RuntimeError("503 temporary Gemini outage")
+        return {
+            "segments": self.translated,
+            "issues": [],
+            "summary": {"reviewed_segments": 2, "corrected_segments": 0, "critical_issues": 0, "notes": []},
+        }
+
+
 class GeminiServiceTests(unittest.TestCase):
     def _write_transcript(self, root: Path) -> Path:
         transcript_path = root / "movie.transcript.json"
@@ -177,6 +218,50 @@ class GeminiServiceTests(unittest.TestCase):
             srt = srt_path.read_text(encoding="utf-8")
             self.assertIn("00:00:00,250 --> 00:00:01,750", srt)
             self.assertIn("Đừng đi!", srt)
+
+    def test_translation_reuses_translation_cache_after_qc_api_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            transcript_path = self._write_transcript(root)
+            paths = MovieProjectPaths.from_transcript(transcript_path)
+            paths.context_json.write_text(
+                json.dumps(
+                    {
+                        "is_complete": True,
+                        "profile": {
+                            "film_profile": {"genre": "Drama"},
+                            "characters": [],
+                            "relationships": [],
+                            "terminology": [],
+                            "style_guide": {},
+                            "uncertainties": [],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            fake_client = FakeRecoverableTranslationClient("test", "test-model")
+            with patch(
+                "video_translator.gemini.film_translation_service.GeminiJsonClient",
+                return_value=fake_client,
+            ):
+                service = FilmTranslationService("test", "test-model")
+                with self.assertRaisesRegex(RuntimeError, "503"):
+                    service.run(transcript_path, paths.context_json, batch_size=10)
+
+                checkpoint = json.loads(paths.translated_json.read_text(encoding="utf-8"))
+                pending = checkpoint["pending_batches"]["1-2"]
+                self.assertEqual(len(pending["translation"]), 2)
+                self.assertNotIn("quality_control", pending)
+                self.assertEqual(fake_client.translation_calls, 1)
+
+                service.run(transcript_path, paths.context_json, batch_size=10)
+
+            self.assertEqual(fake_client.translation_calls, 1)
+            self.assertEqual(fake_client.qc_calls, 2)
+            completed = json.loads(paths.translated_json.read_text(encoding="utf-8"))
+            self.assertTrue(completed["is_complete"])
+            self.assertEqual(completed["pending_batches"], {})
 
     def test_translation_rejects_timestamp_changes(self) -> None:
         source = [{"id": 1, "start": 1.0, "end": 2.0, "text": "Hello"}]
