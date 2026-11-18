@@ -10,5 +10,9 @@ class DownloadCancelledError(VideoTranslatorError):
     """Raised when a download is cancelled by the user."""
 
 
+class TranscriptionCancelledError(VideoTranslatorError):
+    """Raised when audio extraction or transcription is cancelled."""
+
+
 class VideoDownloadError(VideoTranslatorError):
     """Raised when yt-dlp or FFmpeg cannot complete a download."""
