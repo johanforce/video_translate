@@ -113,43 +113,50 @@ def run_ffmpeg(
     output_time = 0.0
     error_lines: list[str] = []
     assert process.stdout is not None
-    while True:
-        if cancel_event.is_set() and process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
-            raise MediaToolError("Đã hủy tác vụ FFmpeg.")
-        line = process.stdout.readline()
-        if not line:
-            if process.poll() is not None:
-                break
-            continue
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if "=" in stripped:
-            key, value = stripped.split("=", 1)
-            if key in {"out_time_us", "out_time_ms"}:
+    try:
+        while True:
+            if cancel_event.is_set() and process.poll() is None:
+                process.terminate()
                 try:
-                    number = float(value)
-                    # FFmpeg's progress fields are microseconds despite the legacy ms name.
-                    output_time = number / 1_000_000.0
-                    if duration_seconds and duration_seconds > 0 and progress_callback:
-                        percent = min(99.0, output_time / duration_seconds * 100.0)
-                        progress_callback(percent, f"FFmpeg đang render... {percent:.1f}%")
-                except ValueError:
-                    pass
-        elif stripped not in {"progress=continue", "progress=end"}:
-            error_lines.append(stripped)
-            if len(error_lines) > 80:
-                error_lines.pop(0)
-            if log_callback and ("error" in stripped.lower() or "warning" in stripped.lower()):
-                log_callback(stripped)
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                raise MediaToolError("Đã hủy tác vụ FFmpeg.")
+            line = process.stdout.readline()
+            if not line:
+                if process.poll() is not None:
+                    break
+                continue
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if "=" in stripped:
+                key, value = stripped.split("=", 1)
+                if key in {"out_time_us", "out_time_ms"}:
+                    try:
+                        number = float(value)
+                        # FFmpeg's progress fields are microseconds despite the legacy ms name.
+                        output_time = number / 1_000_000.0
+                        if duration_seconds and duration_seconds > 0 and progress_callback:
+                            percent = min(99.0, output_time / duration_seconds * 100.0)
+                            progress_callback(percent, f"FFmpeg đang render... {percent:.1f}%")
+                    except ValueError:
+                        pass
+            elif stripped not in {"progress=continue", "progress=end"}:
+                error_lines.append(stripped)
+                if len(error_lines) > 80:
+                    error_lines.pop(0)
+                if log_callback and ("error" in stripped.lower() or "warning" in stripped.lower()):
+                    log_callback(stripped)
+        return_code = process.wait()
+    finally:
+        # Close the progress pipe on success, cancellation and Python exceptions.
+        process.stdout.close()
+        if process.poll() is None:
+            process.kill()
+            process.wait()
 
-    return_code = process.wait()
     if return_code != 0:
         detail = "\n".join(error_lines[-25:])
         raise MediaToolError(
