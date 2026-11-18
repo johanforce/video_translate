@@ -1,0 +1,113 @@
+TASK: ANALYZE THE FILM TRANSCRIPT AND BUILD A PERSISTENT CONTEXT PROFILE
+
+Act as a film script analyst preparing a reference guide for a professional Vietnamese dubbing translator.
+
+INPUT TRANSCRIPT:
+{{TRANSCRIPT_JSON}}
+
+EXISTING PROJECT CONTEXT (may be empty; update rather than discard established facts):
+{{CONTEXT_PROFILE_JSON}}
+
+OBJECTIVE
+Build a concise but useful reference profile that helps translate the entire film consistently. Analyze the supplied transcript as a connected narrative, not as unrelated sentences.
+
+ANALYZE
+
+1. Film profile
+- Likely genre and subgenre.
+- Setting, time period, social/cultural environment, and relevant world rules.
+- Central premise and plot developments actually supported by the transcript.
+- Narrative tone and preferred Vietnamese localization style.
+- Recurring themes, motifs, and important recurring references.
+
+2. Characters
+For every identifiable character, provide:
+- Stable character ID (reuse an existing ID whenever possible).
+- Name and known aliases.
+- Evidence segment IDs supporting identification.
+- Role and concise personality description, only when supported.
+- Approximate age range only if the dialogue gives reliable evidence.
+- Speech style, register, verbal habits, and emotional tendencies.
+- Known relationships and their evidence.
+- Suggested Vietnamese forms of self-reference and address for each known relationship.
+- Confidence: high, medium, or low.
+
+3. Relationships and forms of address
+- Map family, romantic, friendship, professional, hierarchical, and adversarial relationships.
+- Distinguish confirmed relationships from uncertain interpretations.
+- Provide practical Vietnamese addressing rules for both directions of each relationship.
+- Record deliberate changes of address and the emotional or narrative circumstances in which they occur.
+- Do not assume Vietnamese pronouns from names, gender, or age alone.
+
+4. Terminology and named entities
+- Names, places, organizations, ranks, honorifics, fictional concepts, technical vocabulary, recurring objects, and culturally specific references.
+- Recommended Vietnamese rendering.
+- Whether a term should remain untranslated.
+- Evidence segment IDs and confidence.
+- Keep alternative translations only when the context genuinely remains ambiguous.
+
+5. Continuity and unresolved questions
+- Timeline facts and chronology.
+- Important facts revealed so far.
+- Ambiguous speakers, unclear references, uncertain relationships, and possible speech-recognition errors.
+- Contradictions between transcript sections.
+- Details that later batches should preserve.
+
+STRICT RULES
+- Do not invent scenes, character identities, relationships, motivations, or plot facts.
+- Do not identify a speaker solely from gendered language unless the evidence is strong.
+- Do not treat a hypothesis as confirmed canon.
+- Cite evidence using transcript segment IDs, not fabricated timestamps.
+- Preserve established IDs and terminology from the existing profile.
+- When the transcript is only a partial film or chapter, explicitly mark the profile as partial. Do not infer the ending.
+- Prefer a compact profile that is actionable for translation over a long plot retelling.
+
+OUTPUT
+Return one valid JSON object, with this top-level structure:
+
+{
+  "film_profile": {
+    "is_partial": true,
+    "genre": "",
+    "setting": "",
+    "premise": "",
+    "narrative_tone": "",
+    "localization_style": "",
+    "continuity_facts": []
+  },
+  "characters": [
+    {
+      "character_id": "",
+      "name": "",
+      "aliases": [],
+      "role": "",
+      "personality": "",
+      "speech_style": "",
+      "relationships": [],
+      "addressing_rules": [],
+      "evidence_segment_ids": [],
+      "confidence": "high"
+    }
+  ],
+  "relationships": [],
+  "terminology": [
+    {
+      "source_term": "",
+      "vietnamese_term": "",
+      "keep_original": false,
+      "meaning_in_context": "",
+      "evidence_segment_ids": [],
+      "confidence": "high"
+    }
+  ],
+  "style_guide": {
+    "pronoun_policy": "",
+    "dialogue_style": "",
+    "comedy_policy": "",
+    "profanity_policy": "",
+    "special_instructions": []
+  },
+  "uncertainties": []
+}
+
+Use empty arrays or empty strings when information is unavailable. Do not fabricate values to fill the schema.
