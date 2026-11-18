@@ -11,6 +11,15 @@ EXISTING PROJECT CONTEXT (may be empty; update rather than discard established f
 OBJECTIVE
 Build a concise but useful reference profile that helps translate the entire film consistently. Analyze the supplied transcript as a connected narrative, not as unrelated sentences.
 
+INCREMENTAL OUTPUT (IMPORTANT)
+- The application merges this chapter's JSON into the existing profile automatically.
+- Return only new observations from this chapter and material corrections/updates to existing observations. Do not repeat the entire existing profile.
+- For a known character, reuse the existing character_id and return only fields that this chapter adds or materially changes.
+- Do not restate known aliases, relationships, terminology, style rules, or continuity facts unless this chapter provides new evidence.
+- Keep each description to one short sentence. Avoid plot summaries and long prose.
+- Add at most 5 genuinely new continuity facts, 8 terminology entries, and 5 uncertainties in one chapter; prioritize recurring or translation-critical information.
+- Prefer short evidence-backed entries over exhaustive speculation. Empty arrays and strings are valid.
+
 ANALYZE
 
 1. Film profile
@@ -63,7 +72,7 @@ STRICT RULES
 - Prefer a compact profile that is actionable for translation over a long plot retelling.
 
 OUTPUT
-Return one valid JSON object, with this top-level structure:
+Return one compact valid JSON object, containing only the new/updated observations for this chapter, with this top-level structure:
 
 {
   "film_profile": {
