@@ -82,6 +82,14 @@ class AudioTimelineBuilder:
             raise AudioTimelineError(
                 "VieNeu chưa tạo xong toàn bộ audio. Hãy chạy lại TTS để tiếp tục từ manifest."
             )
+        expected_translation_fingerprint = sha256_text(
+            translation_path.read_text(encoding="utf-8")
+        )
+        if tts_state.get("translation_fingerprint") != expected_translation_fingerprint:
+            raise AudioTimelineError(
+                "Audio VieNeu không khớp bản dịch hiện tại. Hãy chạy lại TTS; "
+                "các audio không đổi sẽ được lấy từ cache."
+            )
 
         entries = tts_state.get("segments")
         if not isinstance(entries, dict):
