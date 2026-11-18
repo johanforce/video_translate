@@ -220,12 +220,25 @@ class MovieContextService:
                 "SEGMENT_COUNT": str(len(segments)),
             },
         )
-        self._log("Gemini đang hợp nhất nhân vật, quan hệ và thuật ngữ...")
-        finalized = self.client.generate_json(
-            finalize_prompt,
-            system_prompt,
-            cancel_event=cancel_event,
-        )
+        cached_finalize = state.get("finalize_response")
+        if (
+            state.get("finalize_signature") == config_signature
+            and isinstance(cached_finalize, dict)
+        ):
+            self._log("Dùng cache phản hồi hợp nhất Context Profile.")
+            finalized = cached_finalize
+        else:
+            self._log("Gemini đang hợp nhất nhân vật, quan hệ và thuật ngữ...")
+            finalized = self.client.generate_json(
+                finalize_prompt,
+                system_prompt,
+                cancel_event=cancel_event,
+            )
+            # Save the final API response before normalizing/writing the completed profile.
+            state["finalize_signature"] = config_signature
+            state["finalize_response"] = finalized
+            write_json_atomic(paths.context_json, state)
+
         profile = self._merge_profiles(profile, finalized)
         profile["film_profile"]["is_partial"] = False
         state.update(
