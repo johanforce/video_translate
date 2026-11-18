@@ -161,6 +161,136 @@ class WhisperEngine:
             segments=segments,
         )
 
+    def transcribe_chunks(
+        self,
+        chunks: list[tuple[int, Path, float]],
+        model_size: str = "small",
+        language: str | None = None,
+        cancel_event: threading.Event | None = None,
+        chunk_callback: Callable[
+            [int, list[TranscriptSegment], str, float | None], None
+        ] | None = None,
+    ) -> tuple[str, float | None]:
+        """Transcribe only supplied chunks and checkpoint each completed chunk.
+
+        Each tuple is (zero-based chunk index, WAV path, absolute timeline offset).
+        Segment and word timestamps returned to the callback are absolute video times.
+        """
+        cancel_event = cancel_event or threading.Event()
+        if not chunks:
+            raise WhisperTranscriptionError("Không có audio chunk cần nhận diện.")
+
+        try:
+            from faster_whisper import WhisperModel
+        except ImportError as exc:
+            raise WhisperTranscriptionError(
+                "Chưa cài faster-whisper. Hãy chạy: pip install -r requirements.txt"
+            ) from exc
+
+        self._emit(TranscriptionProgress(5, "Đang khởi tạo Whisper model..."))
+        self._log(f"Whisper model: {model_size} | xử lý {len(chunks)} chunk còn thiếu.")
+        try:
+            model = WhisperModel(model_size, device="auto", compute_type="default")
+            detected_language = language or "unknown"
+            language_probability: float | None = None
+
+            for pending_index, (chunk_index, audio_path, offset) in enumerate(chunks):
+                if cancel_event.is_set():
+                    raise TranscriptionCancelledError("Đã hủy nhận diện lời thoại.")
+                audio_file = Path(audio_path)
+                if not audio_file.is_file() or audio_file.stat().st_size <= 44:
+                    raise WhisperTranscriptionError(
+                        f"Audio chunk {chunk_index + 1} không tồn tại hoặc bị hỏng."
+                    )
+
+                self._log(
+                    f"Whisper chunk {chunk_index + 1}: {audio_file.name} "
+                    f"(offset {offset:.1f}s)"
+                )
+                segments_iter, info = model.transcribe(
+                    str(audio_file),
+                    language=language,
+                    beam_size=5,
+                    vad_filter=True,
+                    word_timestamps=True,
+                    condition_on_previous_text=True,
+                )
+                chunk_language = str(info.language or detected_language)
+                chunk_probability = (
+                    float(info.language_probability)
+                    if info.language_probability is not None
+                    else None
+                )
+                if detected_language == "unknown" or language is not None:
+                    detected_language = chunk_language
+                if language_probability is None and chunk_probability is not None:
+                    language_probability = chunk_probability
+
+                chunk_segments: list[TranscriptSegment] = []
+                for raw_segment in segments_iter:
+                    if cancel_event.is_set():
+                        raise TranscriptionCancelledError("Đã hủy nhận diện lời thoại.")
+                    local_start = float(raw_segment.start)
+                    local_end = float(raw_segment.end)
+                    absolute_start = max(0.0, offset + local_start)
+                    absolute_end = max(absolute_start, offset + local_end)
+                    words: list[WordTimestamp] = []
+                    for raw_word in raw_segment.words or []:
+                        if raw_word.start is None or raw_word.end is None:
+                            continue
+                        words.append(
+                            WordTimestamp(
+                                start=max(0.0, offset + float(raw_word.start)),
+                                end=max(0.0, offset + float(raw_word.end)),
+                                text=str(raw_word.word),
+                                probability=(
+                                    float(raw_word.probability)
+                                    if raw_word.probability is not None
+                                    else None
+                                ),
+                            )
+                        )
+                    text = str(raw_segment.text or "").strip()
+                    if not text:
+                        continue
+                    chunk_segments.append(
+                        TranscriptSegment(
+                            id=len(chunk_segments) + 1,
+                            start=absolute_start,
+                            end=absolute_end,
+                            text=text,
+                            speaker_id=None,
+                            words=words,
+                        )
+                    )
+
+                if chunk_callback:
+                    chunk_callback(
+                        chunk_index,
+                        chunk_segments,
+                        chunk_language,
+                        chunk_probability,
+                    )
+                percent = 10 + int((pending_index + 1) / len(chunks) * 85)
+                self._emit(
+                    TranscriptionProgress(
+                        min(95, percent),
+                        f"Đã nhận diện xong chunk còn thiếu {pending_index + 1}/{len(chunks)}.",
+                        len(chunk_segments),
+                    )
+                )
+        except TranscriptionCancelledError:
+            raise
+        except WhisperTranscriptionError:
+            raise
+        except Exception as exc:
+            raise WhisperTranscriptionError(
+                f"Whisper nhận diện chunk thất bại: {exc}"
+            ) from exc
+
+        self._log(f"Whisper chunk hoàn tất. Ngôn ngữ: {detected_language}.")
+        return detected_language, language_probability
+
     def _emit(self, progress: TranscriptionProgress) -> None:
         if self.progress_callback:
             self.progress_callback(progress)
