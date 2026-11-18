@@ -215,6 +215,18 @@ class FilmTranslationService:
                 pending["quality_control_saved"] = True
                 write_json_atomic(paths.translated_json, state)
 
+            skipped_ids = [
+                int(original["id"])
+                for original, translated in zip(current, checked_batch)
+                if not str(translated.get("translated_text", "")).strip()
+            ]
+            if skipped_ids:
+                self._log(
+                    "Bỏ qua segment không có bản dịch: "
+                    + ", ".join(str(item) for item in skipped_ids)
+                    + ". Các đoạn còn lại vẫn tiếp tục."
+                )
+
             if not isinstance(issues, list):
                 issues = []
             if isinstance(issues, list):
@@ -483,11 +495,8 @@ class FilmTranslationService:
                 raise FilmTranslationError(
                     f"Segment {source_id} thiếu translated_text khi {operation}."
                 )
-            if str(original.get("text", "")).strip() and not translated_text.strip():
-                raise FilmTranslationError(
-                    f"Segment {source_id} bị bỏ trống bản dịch khi {operation}."
-                )
-
+            # An empty translation is treated as an intentionally skipped subtitle.
+            # Keep the segment ID/timing in JSON; the SRT writer omits empty cues.
             emotion = candidate.get("emotion")
             delivery = candidate.get("delivery")
             result.append(
