@@ -111,9 +111,10 @@ class VieNeuTTSService:
             if not text:
                 completed += 1
                 continue
+            spoken_text = self._apply_v4_cues(text, segment)
 
             request_signature = sha256_text(
-                f"{segment_id}|{text}|{voice_id}|{speed:.2f}|v4"
+                f"{segment_id}|{spoken_text}|{voice_id}|{speed:.2f}|v4"
             )
             entries = manifest["segments"]
             entry = entries.get(str(segment_id), {})
@@ -178,7 +179,7 @@ class VieNeuTTSService:
                     )
                 else:
                     audio_path, metadata = self.client.synthesize_segment(
-                        text=text,
+                        text=spoken_text,
                         voice_id=voice_id,
                         speed=speed,
                         segment_id=segment_id,
@@ -222,6 +223,15 @@ class VieNeuTTSService:
             TranscriptionProgress(100, f"VieNeu hoàn tất {completed}/{total} đoạn.", completed)
         )
         return paths.tts_manifest, completed, total
+
+    @staticmethod
+    def _apply_v4_cues(text: str, segment: dict[str, Any]) -> str:
+        """Map only the inline cues supported by the current VieNeu v4 engine."""
+        delivery = str(segment.get("delivery") or "").lower()
+        cue = "[cười]" if delivery == "laughing" else ""
+        if cue and not text.lstrip().startswith(cue):
+            return f"{cue} {text}"
+        return text
 
     @staticmethod
     def _save_job_checkpoint(
