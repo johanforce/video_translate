@@ -222,7 +222,7 @@ class MovieContextService:
             system_prompt,
             cancel_event=cancel_event,
         )
-        profile = self._normalize_profile(finalized)
+        profile = self._merge_profiles(profile, finalized)
         profile["film_profile"]["is_partial"] = False
         state.update(
             {
