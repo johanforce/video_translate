@@ -50,7 +50,7 @@ class GeminiWorker(QThread):
                 )
                 path = service.run(
                     self.transcript_path,
-                    batch_segments=max(40, self.batch_size * 6),
+                    batch_segments=max(40, self.batch_size * 4),
                     cancel_event=self._cancel_event,
                 )
                 self.context_succeeded.emit(str(path))
