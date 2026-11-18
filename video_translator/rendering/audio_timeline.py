@@ -70,6 +70,7 @@ class AudioTimelineBuilder:
                 "Không tìm thấy transcript gốc trong trường source_transcript của file dịch."
             )
         paths = MovieProjectPaths.from_transcript(transcript_path)
+        transcript = read_json(paths.transcript_json)
         manifest_path = (
             Path(tts_manifest).expanduser().resolve()
             if tts_manifest
