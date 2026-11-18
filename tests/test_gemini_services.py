@@ -7,7 +7,8 @@ from unittest.mock import patch
 from video_translator.gemini.film_translation_service import FilmTranslationError, FilmTranslationService
 from video_translator.gemini.movie_context_service import MovieContextService
 from video_translator.gemini.project_paths import MovieProjectPaths
-from video_translator.gemini.json_utils import write_json_atomic
+from video_translator.gemini.json_utils import sha256_file, sha256_text, write_json_atomic
+from video_translator.gemini.prompt_loader import load_prompt
 
 
 class FakeContextClient:
@@ -272,6 +273,154 @@ class GeminiServiceTests(unittest.TestCase):
             completed = json.loads(context_path.read_text(encoding="utf-8"))
             self.assertTrue(completed["is_complete"])
             self.assertEqual(completed["chapter_responses"], {})
+
+    def test_context_model_switch_preserves_completed_chapters(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            transcript_path = root / "movie.transcript.json"
+            segments = [
+                {
+                    "id": index,
+                    "start": float(index),
+                    "end": float(index) + 0.8,
+                    "text": f"Dialogue {index}",
+                }
+                for index in range(1, 81)
+            ]
+            transcript_path.write_text(
+                json.dumps({"is_complete": True, "segments": segments}),
+                encoding="utf-8",
+            )
+            paths = MovieProjectPaths.from_transcript(transcript_path)
+            old_model = "gemini-3.6-flash"
+            batch_size = 40
+            system_prompt = load_prompt("system_prompt.txt")
+            analysis_prompt = load_prompt("context_analysis.txt")
+            finalize_prompt = load_prompt("context_finalize.txt")
+            legacy_signature = sha256_text(
+                sha256_file(transcript_path)
+                + old_model
+                + str(batch_size)
+                + system_prompt
+                + analysis_prompt
+                + finalize_prompt
+            )
+            paths.context_json.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "transcript_fingerprint": sha256_file(transcript_path),
+                        "config_signature": legacy_signature,
+                        "model": old_model,
+                        "batch_segments": batch_size,
+                        "processed_segments": 40,
+                        "total_segments": 80,
+                        "is_complete": False,
+                        "profile": {
+                            "film_profile": {
+                                "is_partial": True,
+                                "genre": "Drama",
+                                "continuity_facts": ["Fact from chapter 1"],
+                            },
+                            "characters": [],
+                            "relationships": [],
+                            "terminology": [],
+                            "style_guide": {},
+                            "uncertainties": [],
+                        },
+                        "chapter_responses": {},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            fake_client = FakeContextClient("test", "gemini-3.8-flash")
+            with patch(
+                "video_translator.gemini.movie_context_service.GeminiJsonClient",
+                return_value=fake_client,
+            ):
+                MovieContextService("test", "gemini-3.8-flash").run(
+                    transcript_path,
+                    batch_segments=batch_size,
+                )
+
+            completed = json.loads(paths.context_json.read_text(encoding="utf-8"))
+            # One remaining chapter plus the final profile consolidation.
+            self.assertEqual(fake_client.calls, 2)
+            self.assertTrue(completed["is_complete"])
+            self.assertEqual(completed["processed_segments"], 80)
+            self.assertEqual(
+                completed["profile"]["film_profile"]["continuity_facts"][0],
+                "Fact from chapter 1",
+            )
+            self.assertEqual(completed["model"], "gemini-3.8-flash")
+
+    def test_translation_model_switch_preserves_completed_batches(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            transcript_path = self._write_transcript(root)
+            paths = MovieProjectPaths.from_transcript(transcript_path)
+            source_fingerprint = "source-fingerprint"
+            context_fingerprint = "context-fingerprint"
+            batch_size = 5
+            prompt_signature = (
+                load_prompt("system_prompt.txt")
+                + load_prompt("translation.txt")
+                + load_prompt("quality_control.txt")
+            )
+            old_model = "gemini-3.6-flash"
+            legacy_signature = sha256_text(
+                source_fingerprint
+                + context_fingerprint
+                + old_model
+                + str(batch_size)
+                + prompt_signature
+            )
+            new_signature = sha256_text(
+                source_fingerprint
+                + context_fingerprint
+                + str(batch_size)
+                + prompt_signature
+            )
+            preserved = [
+                {
+                    "id": 1,
+                    "start": 0.25,
+                    "end": 1.75,
+                    "translated_text": "Đã dịch trước đó",
+                }
+            ]
+            paths.translated_json.write_text(
+                json.dumps(
+                    {
+                        "config_signature": legacy_signature,
+                        "model": old_model,
+                        "source_fingerprint": source_fingerprint,
+                        "context_fingerprint": context_fingerprint,
+                        "batch_size": batch_size,
+                        "segments": preserved,
+                        "pending_batches": {},
+                        "issues": [],
+                        "is_complete": False,
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            resumed = FilmTranslationService._load_or_create_state(
+                paths,
+                new_signature,
+                source_fingerprint,
+                context_fingerprint,
+                batch_size,
+                prompt_signature,
+                "gemini-3.8-flash",
+            )
+
+            self.assertEqual(resumed["segments"], preserved)
+            self.assertEqual(resumed["config_signature"], new_signature)
+            self.assertEqual(resumed["model"], "gemini-3.8-flash")
 
     def test_translation_preserves_ids_and_source_timestamps(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
