@@ -229,11 +229,11 @@ class ProjectPipelineService:
                 log_callback=self.log_callback,
             ).run(
                 paths.transcript_json,
-                batch_segments=max(40, int(translation_batch_size) * 6),
+                batch_segments=max(40, int(translation_batch_size) * 4),
                 cancel_event=cancel_event,
             ),
             model=gemini_model,
-            batch_segments=max(40, int(translation_batch_size) * 6),
+            batch_segments=max(40, int(translation_batch_size) * 4),
         )
 
         # 3. Contextual translation and line-by-line QC.
@@ -366,7 +366,6 @@ class ProjectPipelineService:
         try:
             if stage == "context":
                 context = read_json(manager.paths.context_json)
-                expected_chapter_size = max(40, int(translation_batch_size) * 6)
                 prompt_signature = (
                     load_prompt("system_prompt.txt")
                     + load_prompt("context_analysis.txt")
@@ -374,20 +373,31 @@ class ProjectPipelineService:
                 )
                 transcript_fingerprint = sha256_file(manager.paths.transcript_json)
                 expected_signature = sha256_text(
-                    transcript_fingerprint + str(expected_chapter_size) + prompt_signature
+                    transcript_fingerprint + prompt_signature
                 )
-                legacy_signature = sha256_text(
-                    transcript_fingerprint
-                    + str(context.get("model") or "")
-                    + str(expected_chapter_size)
-                    + prompt_signature
-                )
+                saved_batch_size = int(context.get("batch_segments", 0) or 0)
+                legacy_signatures = {
+                    sha256_text(
+                        transcript_fingerprint
+                        + str(saved_batch_size)
+                        + prompt_signature
+                    )
+                }
+                saved_model = str(context.get("model") or "")
+                if saved_model:
+                    legacy_signatures.add(
+                        sha256_text(
+                            transcript_fingerprint
+                            + saved_model
+                            + str(saved_batch_size)
+                            + prompt_signature
+                        )
+                    )
                 return (
-                    int(context.get("batch_segments", 0)) == expected_chapter_size
-                    and context.get("config_signature") in {
-                        expected_signature,
-                        legacy_signature,
-                    }
+                    context.get("is_complete") is True
+                    and context.get("transcript_fingerprint") == transcript_fingerprint
+                    and context.get("config_signature")
+                    in ({expected_signature} | legacy_signatures)
                 )
             if stage == "translation":
                 translated = read_json(manager.paths.translated_json)
