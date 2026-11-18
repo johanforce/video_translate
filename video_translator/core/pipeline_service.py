@@ -10,8 +10,9 @@ from video_translator.core.models import DownloadProgress, TranscriptionProgress
 from video_translator.core.project_manager import ProjectManager
 from video_translator.download.downloader import VideoDownloader
 from video_translator.gemini.film_translation_service import FilmTranslationService
-from video_translator.gemini.json_utils import read_json, sha256_text
+from video_translator.gemini.json_utils import read_json, sha256_file, sha256_text
 from video_translator.gemini.movie_context_service import MovieContextService
+from video_translator.gemini.prompt_loader import load_prompt
 from video_translator.gemini.project_paths import MovieProjectPaths
 from video_translator.rendering.render_service import RenderService
 from video_translator.transcription.service import TranscriptionService
@@ -363,15 +364,34 @@ class ProjectPipelineService:
             if stage == "context":
                 context = read_json(manager.paths.context_json)
                 expected_chapter_size = max(40, int(translation_batch_size) * 6)
+                expected_signature = sha256_text(
+                    sha256_file(manager.paths.transcript_json)
+                    + gemini_model
+                    + str(expected_chapter_size)
+                    + load_prompt("system_prompt.txt")
+                    + load_prompt("context_analysis.txt")
+                    + load_prompt("context_finalize.txt")
+                )
                 return (
                     context.get("model") == gemini_model
                     and int(context.get("batch_segments", 0)) == expected_chapter_size
+                    and context.get("config_signature") == expected_signature
                 )
             if stage == "translation":
                 translated = read_json(manager.paths.translated_json)
+                expected_signature = sha256_text(
+                    sha256_file(manager.paths.transcript_json)
+                    + sha256_file(manager.paths.context_json)
+                    + gemini_model
+                    + str(int(translation_batch_size))
+                    + load_prompt("system_prompt.txt")
+                    + load_prompt("translation.txt")
+                    + load_prompt("quality_control.txt")
+                )
                 return (
                     translated.get("model") == gemini_model
                     and int(translated.get("batch_size", 0)) == int(translation_batch_size)
+                    and translated.get("config_signature") == expected_signature
                 )
             if stage == "tts":
                 manifest = read_json(manager.paths.tts_manifest)
