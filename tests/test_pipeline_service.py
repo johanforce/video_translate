@@ -44,6 +44,8 @@ class PipelineStageCacheTests(unittest.TestCase):
             "config_signature": context_signature,
             "model": "gemini-test",
             "batch_segments": 180,
+            "processed_segments": 1,
+            "total_segments": 1,
             "profile": {"film_profile": {"genre": "Drama"}},
         }
         paths.context_json.write_text(json.dumps(context), encoding="utf-8")
@@ -149,11 +151,12 @@ class PipelineStageCacheTests(unittest.TestCase):
                 )
             )
 
-    def test_changed_batch_configuration_invalidates_only_dependent_stage(self) -> None:
+    def test_changed_translation_batch_invalidates_only_translation_stage(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             paths, manager = self._prepare_project(Path(temp_dir))
 
-            self.assertFalse(
+            # Context is already complete and does not depend on translation batch size.
+            self.assertTrue(
                 ProjectPipelineService._is_stage_completed(
                     manager,
                     "context",
