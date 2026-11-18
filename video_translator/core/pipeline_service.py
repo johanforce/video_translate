@@ -367,12 +367,15 @@ class ProjectPipelineService:
             if stage == "context":
                 context = read_json(manager.paths.context_json)
                 transcript = read_json(manager.paths.transcript_json)
+                total_segments = len(transcript.get("segments", []))
+                processed_segments = int(
+                    context.get("processed_segments", total_segments)
+                )
                 return (
                     context.get("is_complete") is True
                     and context.get("transcript_fingerprint")
                     == sha256_file(manager.paths.transcript_json)
-                    and int(context.get("processed_segments", 0))
-                    == len(transcript.get("segments", []))
+                    and processed_segments == total_segments
                 )
             if stage == "translation":
                 translated = read_json(manager.paths.translated_json)
