@@ -44,6 +44,22 @@ class FakeVieNeuClient:
 
 
 class TTSServiceTests(unittest.TestCase):
+    def test_vieneu_v4_only_gets_supported_inline_laugh_cue(self) -> None:
+        self.assertEqual(
+            VieNeuTTSService._apply_v4_cues(
+                "Tôi không tin nổi!",
+                {"delivery": "laughing", "emotion": "humorous"},
+            ),
+            "[cười] Tôi không tin nổi!",
+        )
+        self.assertEqual(
+            VieNeuTTSService._apply_v4_cues(
+                "Tôi không tin nổi!",
+                {"delivery": "shouting", "emotion": "angry"},
+            ),
+            "Tôi không tin nổi!",
+        )
+
     def test_completed_audio_is_cached_on_rerun(self) -> None:
         FakeVieNeuClient.calls = 0
         with tempfile.TemporaryDirectory() as temp_dir:
