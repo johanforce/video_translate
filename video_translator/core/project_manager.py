@@ -100,7 +100,7 @@ class ProjectManager:
         self._save()
         return self.state
 
-    def start_stage(self, stage: str) -> None:
+    def start_stage(self, stage: str, **details: Any) -> None:
         self._validate_stage(stage)
         entry = self.state["stages"].setdefault(stage, {})
         entry.update(
@@ -110,6 +110,7 @@ class ProjectManager:
                 "started_at": self._now(),
                 "updated_at": self._now(),
                 "last_error": "",
+                **details,
             }
         )
         self._append_history(stage, "running")
