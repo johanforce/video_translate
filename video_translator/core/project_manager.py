@@ -7,6 +7,7 @@ from typing import Any
 from video_translator.gemini.json_utils import (
     read_json,
     sha256_file,
+    sha256_text,
     write_json_atomic,
 )
 from video_translator.gemini.project_paths import MovieProjectPaths
