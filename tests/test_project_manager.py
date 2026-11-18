@@ -91,6 +91,49 @@ class ProjectManagerTests(unittest.TestCase):
             self.assertEqual(manager.state["stages"]["tts"]["status"], "not_started")
             self.assertEqual(manager.next_incomplete_stage(), "tts")
 
+    def test_partial_transcript_is_resumable_not_completed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_video = root / "film.mp4"
+            source_video.write_bytes(b"video")
+            transcript = root / "film.transcript.json"
+            checkpoint = root / ".video_translator_cache" / "film" / "transcription_state.json"
+            checkpoint.parent.mkdir(parents=True)
+            checkpoint.write_text(
+                json.dumps(
+                    {
+                        "total_chunks": 4,
+                        "completed_chunks": 2,
+                        "is_complete": False,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            transcript.write_text(
+                json.dumps(
+                    {
+                        "source_video": str(source_video),
+                        "is_complete": False,
+                        "checkpoint_path": str(checkpoint),
+                        "segments": [
+                            {"id": 1, "start": 0.0, "end": 1.0, "text": "Hello"}
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            manager = ProjectManager(transcript)
+            self.assertEqual(
+                manager.state["stages"]["transcription"]["status"],
+                "not_started",
+            )
+            self.assertEqual(
+                manager.state["stages"]["transcription"]["progress"],
+                50,
+            )
+            self.assertEqual(manager.next_incomplete_stage(), "transcription")
+
     def test_running_stage_becomes_interrupted_after_reopen(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
