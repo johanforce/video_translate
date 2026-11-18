@@ -35,7 +35,12 @@ class ProjectRegistry:
         source = Path(source_text).expanduser()
         projects = self._load()
         projects[self._key(source)] = str(transcript)
-        write_json_atomic(self.path, {"schema_version": 1, "projects": projects})
+        try:
+            write_json_atomic(self.path, {"schema_version": 1, "projects": projects})
+        except OSError:
+            # Project recovery must continue even when the optional user registry
+            # cannot be written (for example, a restricted home directory).
+            return
 
     def find_for_video(
         self,
