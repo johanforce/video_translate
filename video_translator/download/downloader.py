@@ -183,14 +183,6 @@ class VideoDownloader:
             if candidate.is_file() and candidate.suffix.lower() == ".mp4":
                 return candidate
 
-        candidates = sorted(
-            self.output_dir.glob(f"*[{video_id}].mp4"),
-            key=lambda path: path.stat().st_mtime,
-            reverse=True,
-        )
-        if candidates:
-            return candidates[0]
-
         requested_downloads = info.get("requested_downloads")
         if isinstance(requested_downloads, list):
             for item in requested_downloads:
