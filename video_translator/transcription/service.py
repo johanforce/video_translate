@@ -256,9 +256,11 @@ class TranscriptionService:
 
         if pending:
             engine = WhisperEngine(
+                # Chunk completion drives the durable percentage. Keep the bar indeterminate
+                # while Whisper is processing a chunk so a resumed run never jumps backward.
                 progress_callback=lambda progress: self._emit(
                     TranscriptionProgress(
-                        min(94, max(5, progress.percent or 5)),
+                        None,
                         progress.message,
                         progress.segments_done,
                     )
