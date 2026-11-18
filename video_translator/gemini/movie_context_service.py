@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from video_translator.core.errors import VideoTranslatorError
 from video_translator.core.models import TranscriptionProgress
-from video_translator.gemini.client import GeminiJsonClient
+from video_translator.gemini.client import GeminiJsonClient, GeminiOutputLimitError
 from video_translator.gemini.json_utils import (
     read_json,
     sha256_file,
@@ -68,7 +68,7 @@ class MovieContextService:
     def run(
         self,
         transcript_path: Path,
-        batch_segments: int = 220,
+        batch_segments: int = 120,
         cancel_event: threading.Event | None = None,
     ) -> Path:
         cancel_event = cancel_event or threading.Event()
@@ -105,38 +105,91 @@ class MovieContextService:
         else:
             state = self._new_state(fingerprint)
 
-        if (
-            state.get("is_complete") is not True
-            and state.get("batch_segments") not in (None, batch_size)
-        ):
-            self._log("Kích thước chapter đã đổi; tạo checkpoint phân tích mới để tránh bỏ sót đoạn.")
-            state = self._new_state(fingerprint)
-
         system_prompt = load_prompt("system_prompt.txt")
         analysis_template = load_prompt("context_analysis.txt")
         finalize_template = load_prompt("context_finalize.txt")
         prompt_signature = system_prompt + analysis_template + finalize_template
-        # A Gemini model change must not invalidate completed chapters. The new
-        # model is used only for chapters that have not yet been processed.
-        config_signature = sha256_text(
-            fingerprint + str(batch_size) + prompt_signature
-        )
-        saved_signature = state.get("config_signature")
-        if saved_signature != config_signature:
-            saved_model = str(state.get("model") or "")
-            legacy_signature = sha256_text(
-                fingerprint + saved_model + str(batch_size) + prompt_signature
-            )
-            if saved_model and saved_signature == legacy_signature:
-                self._log(
-                    f"Đổi Gemini model {saved_model} → {self.model}; "
-                    "giữ nguyên chapter đã phân tích và tiếp tục phần còn lại."
+        # Model and chapter size are execution settings, not profile identity.
+        # A model switch or smaller chapter size must preserve accepted chapters.
+        config_signature = sha256_text(fingerprint + prompt_signature)
+        saved_signature = str(state.get("config_signature") or "")
+        saved_model = str(state.get("model") or "")
+        try:
+            saved_batch_size = int(state.get("batch_segments") or batch_size)
+        except (TypeError, ValueError):
+            saved_batch_size = batch_size
+
+        legacy_signatures = {
+            sha256_text(
+                fingerprint + str(saved_batch_size) + prompt_signature
+            ),
+        }
+        if saved_model:
+            legacy_signatures.add(
+                sha256_text(
+                    fingerprint
+                    + saved_model
+                    + str(saved_batch_size)
+                    + prompt_signature
                 )
-                state["config_signature"] = config_signature
-                state["model"] = self.model
-                write_json_atomic(paths.context_json, state)
-            else:
-                state = self._new_state(fingerprint)
+            )
+
+        signature_is_compatible = (
+            saved_signature == config_signature
+            or saved_signature in legacy_signatures
+        )
+        if not signature_is_compatible:
+            # Transcript or analysis prompt changed: old observations are no longer
+            # guaranteed to be valid, so start a new context checkpoint.
+            state = self._new_state(fingerprint)
+            saved_signature = config_signature
+            saved_batch_size = batch_size
+
+        profile = self._normalize_profile(state.get("profile"))
+        processed = int(state.get("processed_segments", 0) or 0)
+        processed = min(processed, len(segments))
+
+        if (
+            state.get("is_complete") is True
+            and processed == len(segments)
+            and isinstance(state.get("profile"), dict)
+            and signature_is_compatible
+        ):
+            self._emit(
+                TranscriptionProgress(
+                    100,
+                    "Context Profile đã hoàn tất; không cần gọi Gemini lại.",
+                    len(segments),
+                )
+            )
+            self._log(f"Đã dùng lại Context Profile: {paths.context_json}")
+            return paths.context_json
+
+        if (
+            saved_signature != config_signature
+            or saved_batch_size != batch_size
+            or saved_model != self.model
+        ):
+            self._log(
+                f"Giữ checkpoint {processed}/{len(segments)} segment; "
+                f"chapter size {saved_batch_size} → {batch_size}, "
+                f"Gemini model {saved_model or 'chưa ghi nhận'} → {self.model}."
+            )
+            # Old chapter cache keys/signatures were tied to the previous chunk
+            # boundaries or model. The merged profile and processed count remain safe.
+            state["chapter_responses"] = {}
+            state.pop("finalize_response", None)
+            state.pop("finalize_signature", None)
+            state["config_signature"] = config_signature
+            state["batch_segments"] = batch_size
+            state["model"] = self.model
+            state["transcript_fingerprint"] = fingerprint
+            state["processed_segments"] = processed
+            state["total_segments"] = len(segments)
+            state["profile"] = profile
+            state["is_complete"] = False
+            write_json_atomic(paths.context_json, state)
+
         state["config_signature"] = config_signature
 
         profile = self._normalize_profile(state.get("profile"))
@@ -164,14 +217,175 @@ class MovieContextService:
             + (f"{processed}/{len(segments)} segments đã phân tích." if processed else "bắt đầu mới.")
         )
 
-        for batch_index, chunk in enumerate(batches):
-            # Compare with the actual end of the final partial chapter, not the
-            # nominal batch boundary; otherwise the final chapter is analyzed twice
-            # whenever a run resumes after its checkpoint was written.
-            chunk_end = min((batch_index + 1) * batch_size, len(segments))
-            if chunk_end <= processed:
-                continue
+        def analyze_chunk(
+            chunk: list[dict[str, Any]],
+            chunk_start: int,
+            batch_index: int,
+            base_chunk_start: int,
+            base_chunk_end: int,
+            current_profile: dict[str, Any],
+        ) -> dict[str, Any]:
+            nonlocal processed
             if cancel_event.is_set():
+                raise MovieContextError("Đã hủy phân tích ngữ cảnh phim.")
+
+            chunk_end = chunk_start + len(chunk)
+            if not chunk:
+                return current_profile
+
+            chapter_payload = {
+                "chapter_index": batch_index + 1,
+                "chapter_count": len(batches),
+                "chapter_segment_range": [chunk_start + 1, chunk_end],
+                "first_segment_id": chunk[0].get("id"),
+                "last_segment_id": chunk[-1].get("id"),
+                "transcript_is_complete_input": len(batches) == 1,
+                "segments": self._prompt_segments(chunk),
+            }
+            chapter_signature = sha256_text(
+                config_signature
+                + json.dumps(chapter_payload, ensure_ascii=False, sort_keys=True)
+                + json.dumps(current_profile, ensure_ascii=False, sort_keys=True)
+            )
+            is_original_chapter = (
+                chunk_start == base_chunk_start and chunk_end == base_chunk_end
+            )
+            cache_key = (
+                str(batch_index)
+                if is_original_chapter
+                else f"{batch_index}:{chunk_start + 1}-{chunk_end}"
+            )
+            chapter_responses = state.setdefault("chapter_responses", {})
+            cached_chapter = chapter_responses.get(cache_key)
+
+            if (
+                isinstance(cached_chapter, dict)
+                and cached_chapter.get("signature") == chapter_signature
+                and isinstance(cached_chapter.get("response"), dict)
+            ):
+                self._log(
+                    f"Dùng cache phản hồi chapter {batch_index + 1}, "
+                    f"segments {chunk_start + 1}-{chunk_end}."
+                )
+                response = cached_chapter["response"]
+            else:
+                prompt = render_prompt(
+                    analysis_template,
+                    {
+                        "TRANSCRIPT_JSON": json.dumps(chapter_payload, ensure_ascii=False),
+                        "CONTEXT_PROFILE_JSON": json.dumps(
+                            current_profile, ensure_ascii=False
+                        ),
+                    },
+                )
+                self._log(
+                    f"Gemini context chapter {batch_index + 1}/{len(batches)} "
+                    f"(segments {chunk_start + 1}-{chunk_end})..."
+                )
+                if is_original_chapter:
+                    debug_name = f"{paths.context_json.stem}.chapter-{batch_index + 1:02d}.raw.txt"
+                else:
+                    debug_name = (
+                        f"{paths.context_json.stem}.chapter-{batch_index + 1:02d}."
+                        f"seg-{chunk_start + 1:04d}-{chunk_end:04d}.raw.txt"
+                    )
+                debug_path = paths.context_json.with_name(debug_name)
+                try:
+                    response = self.client.generate_json(
+                        prompt,
+                        system_prompt,
+                        cancel_event=cancel_event,
+                        debug_path=debug_path,
+                    )
+                except GeminiOutputLimitError as exc:
+                    if len(chunk) <= 1:
+                        raise MovieContextError(
+                            "Gemini vẫn chạm MAX_TOKENS khi chỉ phân tích 1 segment. "
+                            f"Phản hồi lỗi: {exc}"
+                        ) from exc
+
+                    middle = len(chunk) // 2
+                    left = chunk[:middle]
+                    right = chunk[middle:]
+                    self._log(
+                        f"[MAX_TOKENS] Chapter {batch_index + 1}: "
+                        f"{chunk_start + 1}-{chunk_end} quá dài; tự chia thành "
+                        f"{chunk_start + 1}-{chunk_start + middle} và "
+                        f"{chunk_start + middle + 1}-{chunk_end}."
+                    )
+                    current_profile = analyze_chunk(
+                        left,
+                        chunk_start,
+                        batch_index,
+                        base_chunk_start,
+                        base_chunk_end,
+                        current_profile,
+                    )
+                    return analyze_chunk(
+                        right,
+                        chunk_start + middle,
+                        batch_index,
+                        base_chunk_start,
+                        base_chunk_end,
+                        current_profile,
+                    )
+
+                # Checkpoint the valid JSON response before merging it into the profile.
+                chapter_responses[cache_key] = {
+                    "signature": chapter_signature,
+                    "response": response,
+                }
+                state["chapter_responses"] = chapter_responses
+                write_json_atomic(paths.context_json, state)
+
+            current_profile = self._merge_profiles(current_profile, response)
+            processed = max(processed, chunk_end)
+            chapter_responses.pop(cache_key, None)
+            state.update(
+                {
+                    "schema_version": 1,
+                    "transcript_fingerprint": fingerprint,
+                    "source_transcript": str(paths.transcript_json),
+                    "model": self.model,
+                    "config_signature": config_signature,
+                    "batch_segments": batch_size,
+                    "processed_segments": processed,
+                    "total_segments": len(segments),
+                    "is_complete": False,
+                    "profile": current_profile,
+                    "chapter_responses": chapter_responses,
+                }
+            )
+            write_json_atomic(paths.context_json, state)
+            percent = min(90, int(processed / len(segments) * 90))
+            self._emit(
+                TranscriptionProgress(
+                    percent,
+                    f"Đã phân tích ngữ cảnh {processed}/{len(segments)} đoạn...",
+                    processed,
+                )
+            )
+            return current_profile
+
+        for batch_index in range(len(batches)):
+            base_chunk_start = batch_index * batch_size
+            base_chunk_end = min((batch_index + 1) * batch_size, len(segments))
+            if base_chunk_end <= processed:
+                continue
+            chunk_start = max(base_chunk_start, processed)
+            chunk = segments[chunk_start:base_chunk_end]
+            if not chunk:
+                continue
+            profile = analyze_chunk(
+                chunk,
+                chunk_start,
+                batch_index,
+                base_chunk_start,
+                base_chunk_end,
+                profile,
+            )
+
+        if cancel_event.is_set():
                 raise MovieContextError("Đã hủy phân tích ngữ cảnh phim.")
 
             chunk_start = batch_index * batch_size
@@ -278,16 +492,25 @@ class MovieContextService:
             debug_path = paths.context_json.with_name(
                 f"{paths.context_json.stem}.finalize.raw.txt"
             )
-            finalized = self.client.generate_json(
-                finalize_prompt,
-                system_prompt,
-                cancel_event=cancel_event,
-                debug_path=debug_path,
-            )
-            # Save the final API response before normalizing/writing the completed profile.
-            state["finalize_signature"] = config_signature
-            state["finalize_response"] = finalized
-            write_json_atomic(paths.context_json, state)
+            try:
+                finalized = self.client.generate_json(
+                    finalize_prompt,
+                    system_prompt,
+                    cancel_event=cancel_event,
+                    debug_path=debug_path,
+                )
+            except GeminiOutputLimitError as exc:
+                self._log(
+                    "Gemini chạm MAX_TOKENS khi hợp nhất Context Profile; "
+                    "dùng kết quả hợp nhất cục bộ đã chống trùng lặp. "
+                    f"Chi tiết: {exc}"
+                )
+                finalized = {}
+            else:
+                # Save the final API response before normalizing/writing the completed profile.
+                state["finalize_signature"] = config_signature
+                state["finalize_response"] = finalized
+                write_json_atomic(paths.context_json, state)
 
         profile = self._merge_profiles(profile, finalized)
         profile["film_profile"]["is_partial"] = False
