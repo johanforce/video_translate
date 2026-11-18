@@ -56,7 +56,7 @@ class WhisperEngine:
 
         self._emit(TranscriptionProgress(15, "Đang khởi tạo Whisper..."))
         self._log(
-            f"Whisper model: {model_size} | device=auto | compute_type=int8_float16/auto"
+            f"Whisper model: {model_size} | device=auto | compute_type=default"
         )
         try:
             model = WhisperModel(model_size, device="auto", compute_type="default")
@@ -68,7 +68,6 @@ class WhisperEngine:
                 str(audio_file),
                 language=language,
                 beam_size=5,
-                best_of=5,
                 vad_filter=True,
                 word_timestamps=True,
                 condition_on_previous_text=True,
