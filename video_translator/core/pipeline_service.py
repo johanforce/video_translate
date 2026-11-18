@@ -149,9 +149,18 @@ class ProjectPipelineService:
         def run_stage(stage: str, action: Callable[[], Any], **details: Any) -> Any:
             self._check_cancel(cancel_event)
             manager.refresh()
-            if self._stage_completed(manager, stage, gemini_model, whisper_model,
-                                     source_language, voice_id, voice_speed,
-                                     subtitle_mode, original_audio_mode):
+            if self._is_stage_completed(
+                manager,
+                stage,
+                gemini_model,
+                whisper_model,
+                source_language,
+                voice_id,
+                voice_speed,
+                translation_batch_size,
+                subtitle_mode,
+                original_audio_mode,
+            ):
                 self._log(f"[CACHE] Bỏ qua {stage}: kết quả đã hoàn tất và hợp lệ.")
                 return None
 
@@ -294,6 +303,65 @@ class ProjectPipelineService:
             "render_metadata": metadata,
             "project": manager.project_file,
         }
+
+    @staticmethod
+    def _is_stage_completed(
+        manager: ProjectManager,
+        stage: str,
+        gemini_model: str,
+        whisper_model: str,
+        source_language: str | None,
+        voice_id: str,
+        voice_speed: float,
+        translation_batch_size: int,
+        subtitle_mode: str,
+        original_audio_mode: str,
+    ) -> bool:
+        manager.refresh()
+        if manager.state["stages"].get(stage, {}).get("status") != "completed":
+            return False
+
+        try:
+            if stage == "context":
+                context = read_json(manager.paths.context_json)
+                expected_chapter_size = max(40, int(translation_batch_size) * 6)
+                return (
+                    context.get("model") == gemini_model
+                    and int(context.get("batch_segments", 0)) == expected_chapter_size
+                )
+            if stage == "translation":
+                translated = read_json(manager.paths.translated_json)
+                return (
+                    translated.get("model") == gemini_model
+                    and int(translated.get("batch_size", 0)) == int(translation_batch_size)
+                )
+            if stage == "tts":
+                manifest = read_json(manager.paths.tts_manifest)
+                return (
+                    manifest.get("voice_id") == voice_id
+                    and abs(float(manifest.get("speed", -1)) - float(voice_speed)) < 0.001
+                )
+            if stage == "render":
+                output = manager.paths.transcript_json.parent / (
+                    manager.paths.transcript_json.name.removesuffix(".transcript.json")
+                    + ".vi.dubbed.mp4"
+                )
+                metadata = read_json(output.with_suffix(".render.json"))
+                return (
+                    metadata.get("subtitle_mode") == subtitle_mode
+                    and metadata.get("original_audio_mode") == original_audio_mode
+                )
+            if stage == "transcription":
+                transcript = read_json(manager.paths.transcript_json)
+                requested = "auto" if source_language is None else source_language
+                actual_requested = str(transcript.get("requested_language") or "auto")
+                return (
+                    transcript.get("model") == whisper_model
+                    and actual_requested == requested
+                )
+        except (OSError, ValueError, TypeError):
+            return False
+        return False
 
     @staticmethod
     def _write_existing_transcript(path: Path, payload: dict[str, Any]) -> None:
