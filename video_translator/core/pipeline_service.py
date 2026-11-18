@@ -366,38 +366,13 @@ class ProjectPipelineService:
         try:
             if stage == "context":
                 context = read_json(manager.paths.context_json)
-                prompt_signature = (
-                    load_prompt("system_prompt.txt")
-                    + load_prompt("context_analysis.txt")
-                    + load_prompt("context_finalize.txt")
-                )
-                transcript_fingerprint = sha256_file(manager.paths.transcript_json)
-                expected_signature = sha256_text(
-                    transcript_fingerprint + prompt_signature
-                )
-                saved_batch_size = int(context.get("batch_segments", 0) or 0)
-                legacy_signatures = {
-                    sha256_text(
-                        transcript_fingerprint
-                        + str(saved_batch_size)
-                        + prompt_signature
-                    )
-                }
-                saved_model = str(context.get("model") or "")
-                if saved_model:
-                    legacy_signatures.add(
-                        sha256_text(
-                            transcript_fingerprint
-                            + saved_model
-                            + str(saved_batch_size)
-                            + prompt_signature
-                        )
-                    )
+                transcript = read_json(manager.paths.transcript_json)
                 return (
                     context.get("is_complete") is True
-                    and context.get("transcript_fingerprint") == transcript_fingerprint
-                    and context.get("config_signature")
-                    in ({expected_signature} | legacy_signatures)
+                    and context.get("transcript_fingerprint")
+                    == sha256_file(manager.paths.transcript_json)
+                    and int(context.get("processed_segments", 0))
+                    == len(transcript.get("segments", []))
                 )
             if stage == "translation":
                 translated = read_json(manager.paths.translated_json)
