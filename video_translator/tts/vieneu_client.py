@@ -199,9 +199,39 @@ class VieNeuClient:
                     timeout=(15, self.timeout),
                 )
                 if response.status_code == 409:
+                    try:
+                        conflict_payload = response.json()
+                    except ValueError:
+                        conflict_payload = {}
+                    code = (
+                        conflict_payload.get("code")
+                        if isinstance(conflict_payload, dict)
+                        else None
+                    )
+                    if code not in {None, "IDEMPOTENCY_IN_FLIGHT"}:
+                        self._raise_for_api_error(response)
                     retry_after = self._retry_after(response, 1)
                     self._wait(cancel_event, retry_after)
                     continue
+                if response.status_code == 429:
+                    # Quota exhaustion is not a transient rate limit. Stop instead of
+                    # waiting and retrying a billable operation that cannot succeed.
+                    try:
+                        error_payload = response.json()
+                    except ValueError:
+                        error_payload = {}
+                    error_code = (
+                        error_payload.get("code")
+                        if isinstance(error_payload, dict)
+                        else None
+                    )
+                    if error_code in {
+                        "GRANT_TOKENS_EXHAUSTED",
+                        "GRANT_DAILY_LIMIT",
+                        "GRANT_WEEKLY_LIMIT",
+                        "TRIAL_API_DAILY_LIMIT",
+                    }:
+                        self._raise_for_api_error(response)
                 if response.status_code in {429, 500, 502, 503, 504}:
                     retry_after = self._retry_after(response, min(30, attempt * 3))
                     self._wait(cancel_event, retry_after)
