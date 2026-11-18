@@ -115,6 +115,7 @@ class TranscriptionResumeTests(unittest.TestCase):
                 patch(
                     "video_translator.transcription.service.WhisperEngine",
                     side_effect=[first_engine, second_engine],
+                ),
             ):
                 extractor.return_value.extract.side_effect = fake_extract
                 first_service = TranscriptionService(chunk_seconds=60)
