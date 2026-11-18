@@ -90,7 +90,107 @@ class GeminiJsonClient:
                     message = " ".join(details)
                     if self._hit_output_limit(response):
                         raise GeminiOutputLimitError(message) from parse_error
-                    raise GeminiClientError(message) from parse_error
+
+                    # A normal STOP with malformed JSON is not an output-limit
+                    # failure. Give the model one syntax-only repair attempt before
+                    # failing the chapter; do not re-run the chapter analysis.
+                    if cancel_event.is_set():
+                        raise GeminiClientError("Đã hủy tác vụ Gemini.") from parse_error
+                    repair_system = (
+                        "You are a strict JSON syntax repair tool. "
+                        "Return exactly one valid JSON object. Repair syntax only: "
+                        "preserve every key, value, list item, and meaning from the "
+                        "provided text. Do not summarize, translate, infer, add, or "
+                        "remove information. Do not include Markdown fences or prose."
+                    )
+                    repair_prompt = (
+                        "The following model response was intended to be a JSON object "
+                        "but Python's JSON parser rejected it. Repair only the JSON "
+                        "syntax and return the complete corrected object.\n\n"
+                        f"Parser error: {parse_error}\n\n"
+                        "INVALID RESPONSE TO REPAIR:\n"
+                        + response_text
+                    )
+                    repair_config = self._types.GenerateContentConfig(
+                        system_instruction=repair_system,
+                        response_mime_type="application/json",
+                        temperature=0.0,
+                        max_output_tokens=8192,
+                    )
+                    try:
+                        repaired_response = self._client.models.generate_content(
+                            model=self.model,
+                            contents=repair_prompt,
+                            config=repair_config,
+                        )
+                    except Exception as repair_exc:
+                        raise GeminiClientError(
+                            message
+                            + " Tự sửa JSON không thành công: "
+                            + self._friendly_error(repair_exc)
+                        ) from repair_exc
+
+                    repaired_text = getattr(repaired_response, "text", None)
+                    if not repaired_text or not repaired_text.strip():
+                        if self._hit_output_limit(repaired_response):
+                            repair_diagnostics = self._response_diagnostics(
+                                repaired_response
+                            )
+                            raise GeminiOutputLimitError(
+                                message
+                                + " Lần tự sửa JSON chạm MAX_TOKENS. "
+                                + repair_diagnostics
+                            ) from parse_error
+                        raise GeminiClientError(
+                            message + " Gemini không trả nội dung trong lần tự sửa JSON."
+                        ) from parse_error
+
+                    try:
+                        repaired_value = self._parse_json(repaired_text)
+                    except GeminiClientError as repair_error:
+                        repair_diagnostics = self._response_diagnostics(
+                            repaired_response
+                        )
+                        repair_path = (
+                            debug_path.with_suffix(".repair.raw.txt")
+                            if debug_path is not None
+                            else None
+                        )
+                        repair_saved = self._save_raw_response(
+                            repair_path, repaired_text
+                        )
+                        repair_details = [
+                            message,
+                            "Gemini đã thử tự sửa JSON nhưng kết quả vẫn không hợp lệ:",
+                            str(repair_error),
+                        ]
+                        if repair_diagnostics:
+                            repair_details.append(repair_diagnostics)
+                        if repair_saved:
+                            repair_details.append(repair_saved)
+                        if self._hit_output_limit(repaired_response):
+                            raise GeminiOutputLimitError(
+                                " ".join(repair_details)
+                            ) from repair_error
+                        raise GeminiClientError(
+                            " ".join(repair_details)
+                        ) from repair_error
+
+                    if debug_path is not None:
+                        repaired_path = debug_path.with_suffix(".repaired.json")
+                        try:
+                            repaired_path.write_text(
+                                json.dumps(
+                                    repaired_value,
+                                    ensure_ascii=False,
+                                    indent=2,
+                                ),
+                                encoding="utf-8",
+                                newline="\n",
+                            )
+                        except OSError:
+                            pass
+                    return repaired_value
             except Exception as exc:
                 last_error = exc
                 if not self._is_retryable(exc) or attempt >= max_attempts:
