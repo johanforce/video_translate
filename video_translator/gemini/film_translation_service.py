@@ -62,6 +62,10 @@ class FilmTranslationService:
         context = context_envelope.get("profile")
         if not isinstance(context, dict):
             raise FilmTranslationError("Context Profile không hợp lệ.")
+        if context_envelope.get("is_complete") is not True:
+            raise FilmTranslationError(
+                "Context Profile chưa phân tích toàn bộ transcript; hãy hoàn tất bước phân tích phim trước."
+            )
         source_segments = transcript.get("segments")
         if not isinstance(source_segments, list) or not source_segments:
             raise FilmTranslationError("Transcript không có segments để dịch.")
