@@ -852,6 +852,8 @@ class MainWindow(QMainWindow):
                 self._refresh_context_status()
                 self._refresh_project()
 
+        # Project discovery may have switched to the folder containing the saved transcript.
+        output_text = self.output_input.text().strip()
         if transcript_path is None and video_path is None and not video_url:
             QMessageBox.warning(
                 self,
