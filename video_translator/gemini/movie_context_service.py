@@ -8,7 +8,12 @@ from typing import Any, Callable
 from video_translator.core.errors import VideoTranslatorError
 from video_translator.core.models import TranscriptionProgress
 from video_translator.gemini.client import GeminiJsonClient
-from video_translator.gemini.json_utils import read_json, sha256_file, write_json_atomic
+from video_translator.gemini.json_utils import (
+    read_json,
+    sha256_file,
+    sha256_text,
+    write_json_atomic,
+)
 from video_translator.gemini.project_paths import MovieProjectPaths
 from video_translator.gemini.prompt_loader import load_prompt, render_prompt
 
@@ -103,11 +108,27 @@ class MovieContextService:
             self._log("Kích thước chapter đã đổi; tạo checkpoint phân tích mới để tránh bỏ sót đoạn.")
             state = self._new_state(fingerprint)
 
+        system_prompt = load_prompt("system_prompt.txt")
+        analysis_template = load_prompt("context_analysis.txt")
+        finalize_template = load_prompt("context_finalize.txt")
+        config_signature = sha256_text(
+            fingerprint
+            + self.model
+            + str(batch_size)
+            + system_prompt
+            + analysis_template
+            + finalize_template
+        )
+        if state.get("config_signature") != config_signature:
+            state = self._new_state(fingerprint)
+        state["config_signature"] = config_signature
+
         profile = self._normalize_profile(state.get("profile"))
         processed = int(state.get("processed_segments", 0) or 0)
         processed = min(processed, len(segments))
         if (
-            state.get("is_complete") is True
+            state.get("config_signature") == config_signature
+            and state.get("is_complete") is True
             and processed == len(segments)
             and isinstance(state.get("profile"), dict)
         ):
@@ -120,9 +141,6 @@ class MovieContextService:
             )
             self._log(f"Đã dùng lại Context Profile: {paths.context_json}")
             return paths.context_json
-
-        system_prompt = load_prompt("system_prompt.txt")
-        analysis_template = load_prompt("context_analysis.txt")
 
         self._log(f"Phân tích {len(segments)} segment thành {len(batches)} chapter.")
         self._log(
@@ -170,6 +188,7 @@ class MovieContextService:
                     "transcript_fingerprint": fingerprint,
                     "source_transcript": str(paths.transcript_json),
                     "model": self.model,
+                    "config_signature": config_signature,
                     "batch_segments": batch_size,
                     "processed_segments": processed,
                     "total_segments": len(segments),
@@ -190,7 +209,6 @@ class MovieContextService:
         if cancel_event.is_set():
             raise MovieContextError("Đã hủy phân tích ngữ cảnh phim.")
 
-        finalize_template = load_prompt("context_finalize.txt")
         finalize_prompt = render_prompt(
             finalize_template,
             {
@@ -208,6 +226,9 @@ class MovieContextService:
         profile["film_profile"]["is_partial"] = False
         state.update(
             {
+                "config_signature": config_signature,
+                "model": self.model,
+                "batch_segments": batch_size,
                 "processed_segments": len(segments),
                 "total_segments": len(segments),
                 "is_complete": True,
