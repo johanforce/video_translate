@@ -313,8 +313,8 @@ class FilmTranslationService:
 
     @staticmethod
     def _prompt_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Keep dialogue and segment timing; omit word-level recognition details."""
-        fields = ("id", "start", "end", "text", "speaker_id")
+        """Send only dialogue identity/content; timestamps stay exclusively in source data."""
+        fields = ("id", "text", "speaker_id")
         return [
             {key: item[key] for key in fields if key in item}
             for item in segments
@@ -405,28 +405,58 @@ class FilmTranslationService:
                 f"nhận {len(response_segments)}, cần {len(source)}."
             )
 
-        result: list[dict[str, Any]] = []
-        for original, candidate in zip(source, response_segments):
-            if not isinstance(candidate, dict):
-                raise FilmTranslationError(f"Segment trả về không hợp lệ khi {operation}.")
+        source_by_id: dict[int, dict[str, Any]] = {}
+        for original in source:
             try:
                 source_id = int(original["id"])
-                returned_id = int(candidate["id"])
-                source_start = float(original["start"])
-                source_end = float(original["end"])
-                returned_start = float(candidate["start"])
-                returned_end = float(candidate["end"])
+                float(original["start"])
+                float(original["end"])
             except (KeyError, TypeError, ValueError) as exc:
-                raise FilmTranslationError(f"Segment thiếu ID/timestamp khi {operation}.") from exc
+                raise FilmTranslationError(
+                    f"Transcript nguồn thiếu ID/timestamp hợp lệ khi {operation}."
+                ) from exc
+            if source_id in source_by_id:
+                raise FilmTranslationError(
+                    f"Transcript nguồn có ID segment trùng lặp {source_id}."
+                )
+            source_by_id[source_id] = original
 
-            if returned_id != source_id:
+        # Match returned dialogue by ID, not by array position. Gemini may reorder
+        # objects or alter/omit echoed timing values; neither is authoritative.
+        candidates_by_id: dict[int, dict[str, Any]] = {}
+        for candidate in response_segments:
+            if not isinstance(candidate, dict):
                 raise FilmTranslationError(
-                    f"Gemini thay đổi thứ tự hoặc ID segment {source_id} khi {operation}."
+                    f"Segment trả về không hợp lệ khi {operation}."
                 )
-            if returned_start != source_start or returned_end != source_end:
+            try:
+                returned_id = int(candidate["id"])
+            except (KeyError, TypeError, ValueError) as exc:
                 raise FilmTranslationError(
-                    f"Gemini thay đổi timestamp segment {source_id}; đã từ chối batch."
+                    f"Segment thiếu ID khi {operation}."
+                ) from exc
+
+            if returned_id not in source_by_id:
+                raise FilmTranslationError(
+                    f"Gemini trả về ID segment không tồn tại {returned_id} khi {operation}."
                 )
+            if returned_id in candidates_by_id:
+                raise FilmTranslationError(
+                    f"Gemini trả lặp ID segment {returned_id} khi {operation}."
+                )
+            candidates_by_id[returned_id] = candidate
+
+        missing_ids = set(source_by_id) - set(candidates_by_id)
+        if missing_ids:
+            missing_text = ", ".join(str(item) for item in sorted(missing_ids))
+            raise FilmTranslationError(
+                f"Gemini bỏ thiếu segment khi {operation}: {missing_text}."
+            )
+
+        result: list[dict[str, Any]] = []
+        for original in source:
+            source_id = int(original["id"])
+            candidate = candidates_by_id[source_id]
             translated_text = candidate.get("translated_text")
             if not isinstance(translated_text, str):
                 raise FilmTranslationError(
@@ -442,8 +472,11 @@ class FilmTranslationService:
             result.append(
                 {
                     "id": source_id,
-                    "start": source_start,
-                    "end": source_end,
+                    # Source transcript is the sole authority for timestamps.
+                    # Never reject useful translation text because Gemini rounded
+                    # or hallucinated these redundant fields.
+                    "start": float(original["start"]),
+                    "end": float(original["end"]),
                     "speaker_id": candidate.get("speaker_id"),
                     "translated_text": translated_text.strip(),
                     "emotion": (
