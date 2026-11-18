@@ -90,6 +90,7 @@ class FilmTranslationService:
             if isinstance(item, dict) and str(item.get("id", "")).isdigit()
         }
         quality_issues = list(state.get("issues", []))
+        pending_batches = state.setdefault("pending_batches", {})
         total_batches = (len(source_segments) + batch_size - 1) // batch_size
 
         system_prompt = load_prompt("system_prompt.txt")
@@ -115,42 +116,89 @@ class FilmTranslationService:
                     "SEGMENTS_JSON": json.dumps(current, ensure_ascii=False),
                 },
             )
-            self._log(f"Dịch batch {batch_index + 1}/{total_batches} ({len(current)} đoạn)...")
-            translated_response = self.client.generate_json(
-                prompt,
-                system_prompt,
-                cancel_event=cancel_event,
+            batch_key = f"{ids[0]}-{ids[-1]}"
+            batch_signature = sha256_text(
+                config_signature + json.dumps(current, ensure_ascii=False, sort_keys=True)
             )
-            translated_batch = self._validate_segments(
-                current,
-                translated_response.get("segments"),
-                "dịch",
-            )
+            pending = pending_batches.get(batch_key)
+            if not isinstance(pending, dict) or pending.get("signature") != batch_signature:
+                pending = {"signature": batch_signature}
+                pending_batches[batch_key] = pending
+                write_json_atomic(paths.translated_json, state)
 
-            qc_prompt = render_prompt(
-                quality_template,
-                {
-                    "CONTEXT_PROFILE_JSON": json.dumps(context, ensure_ascii=False),
-                    "SEGMENTS_JSON": json.dumps(current, ensure_ascii=False),
-                    "TRANSLATION_JSON": json.dumps(
-                        {"segments": translated_batch},
-                        ensure_ascii=False,
-                    ),
-                },
-            )
-            self._log(f"Kiểm tra chất lượng batch {batch_index + 1}/{total_batches}...")
-            qc_response = self.client.generate_json(
-                qc_prompt,
-                system_prompt,
-                cancel_event=cancel_event,
-            )
-            checked_batch = self._validate_segments(
-                current,
-                qc_response.get("segments"),
-                "kiểm soát chất lượng",
-            )
+            cached_translation = pending.get("translation")
+            if isinstance(cached_translation, list):
+                self._log(
+                    f"Dùng cache bản dịch batch {batch_index + 1}/{total_batches}."
+                )
+                translated_batch = self._validate_segments(
+                    current,
+                    cached_translation,
+                    "khôi phục cache dịch",
+                )
+            else:
+                self._log(f"Dịch batch {batch_index + 1}/{total_batches} ({len(current)} đoạn)...")
+                translated_response = self.client.generate_json(
+                    prompt,
+                    system_prompt,
+                    cancel_event=cancel_event,
+                )
+                translated_batch = self._validate_segments(
+                    current,
+                    translated_response.get("segments"),
+                    "dịch",
+                )
+                # Persist immediately after Gemini returns, before the QC request.
+                pending["translation"] = translated_batch
+                pending["translation_saved"] = True
+                write_json_atomic(paths.translated_json, state)
 
-            issues = qc_response.get("issues", [])
+            cached_qc = pending.get("quality_control")
+            if isinstance(cached_qc, list):
+                self._log(
+                    f"Dùng cache QC batch {batch_index + 1}/{total_batches}."
+                )
+                checked_batch = self._validate_segments(
+                    current,
+                    cached_qc,
+                    "khôi phục cache QC",
+                )
+                issues = pending.get("issues", [])
+            else:
+                qc_prompt = render_prompt(
+                    quality_template,
+                    {
+                        "CONTEXT_PROFILE_JSON": json.dumps(context, ensure_ascii=False),
+                        "SEGMENTS_JSON": json.dumps(current, ensure_ascii=False),
+                        "TRANSLATION_JSON": json.dumps(
+                            {"segments": translated_batch},
+                            ensure_ascii=False,
+                        ),
+                    },
+                )
+                self._log(f"Kiểm tra chất lượng batch {batch_index + 1}/{total_batches}...")
+                qc_response = self.client.generate_json(
+                    qc_prompt,
+                    system_prompt,
+                    cancel_event=cancel_event,
+                )
+                checked_batch = self._validate_segments(
+                    current,
+                    qc_response.get("segments"),
+                    "kiểm soát chất lượng",
+                )
+                issues = qc_response.get("issues", [])
+                if not isinstance(issues, list):
+                    issues = []
+                issues = [issue for issue in issues if isinstance(issue, dict)]
+                # Persist the QC result before marking the batch complete.
+                pending["quality_control"] = checked_batch
+                pending["issues"] = issues
+                pending["quality_control_saved"] = True
+                write_json_atomic(paths.translated_json, state)
+
+            if not isinstance(issues, list):
+                issues = []
             if isinstance(issues, list):
                 quality_issues.extend(
                     issue for issue in issues if isinstance(issue, dict)
@@ -181,8 +229,11 @@ class FilmTranslationService:
                     "is_complete": len(ordered) == len(source_segments),
                     "segments": ordered,
                     "issues": quality_issues,
+                    "pending_batches": pending_batches,
                 }
             )
+            pending_batches.pop(batch_key, None)
+            state["pending_batches"] = pending_batches
             write_json_atomic(paths.translated_json, state)
             write_json_atomic(
                 paths.quality_json,
@@ -215,6 +266,7 @@ class FilmTranslationService:
             translated_by_id[int(item["id"])] for item in source_segments
         ]
         state["segments"] = ordered_segments
+        state["pending_batches"] = {}
         write_json_atomic(paths.translated_json, state)
         self._write_translated_srt(paths.translated_srt, ordered_segments)
         write_json_atomic(
@@ -264,6 +316,7 @@ class FilmTranslationService:
             "config_signature": signature,
             "segments": [],
             "issues": [],
+            "pending_batches": {},
             "is_complete": False,
         }
 
