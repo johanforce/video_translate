@@ -1251,6 +1251,7 @@ class MainWindow(QMainWindow):
                     self.context_path = context_file
                 except (OSError, ValueError):
                     has_context = False
+
         self.transcribe_button.setEnabled(not self._busy and video_path.is_file())
         has_pipeline_input = (
             video_path.is_file()
@@ -1258,12 +1259,21 @@ class MainWindow(QMainWindow):
             or transcript_path.is_file()
             or Path(self.project_transcript_input.text().strip()).expanduser().is_file()
         )
-        next_stage = (
-            self.project_manager.next_incomplete_stage()
-            if self.project_manager is not None
-            else "transcription" if has_pipeline_input else None
+        if self.project_manager is not None:
+            stages = self.project_manager.state.get("stages", {})
+            next_stage = next(
+                (
+                    stage
+                    for stage in ProjectManager.STAGES
+                    if stages.get(stage, {}).get("status") != "completed"
+                ),
+                None,
+            )
+        else:
+            next_stage = "transcription" if has_pipeline_input else None
+        self.resume_button.setEnabled(
+            not self._busy and has_pipeline_input and next_stage is not None
         )
-        self.resume_button.setEnabled(not self._busy and has_pipeline_input and next_stage is not None)
         self.context_button.setEnabled(not self._busy and has_transcript)
         self.translate_button.setEnabled(not self._busy and has_transcript and has_context)
         self.tts_button.setEnabled(
