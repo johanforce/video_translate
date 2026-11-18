@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from video_translator.gemini.client import GeminiOutputLimitError
 from video_translator.gemini.film_translation_service import FilmTranslationError, FilmTranslationService
 from video_translator.gemini.movie_context_service import MovieContextService
 from video_translator.gemini.project_paths import MovieProjectPaths
@@ -421,6 +422,186 @@ class GeminiServiceTests(unittest.TestCase):
             self.assertEqual(resumed["segments"], preserved)
             self.assertEqual(resumed["config_signature"], new_signature)
             self.assertEqual(resumed["model"], "gemini-3.8-flash")
+
+    def test_context_splits_chapter_automatically_after_max_tokens(self) -> None:
+        class AutoSplitContextClient:
+            def __init__(self, api_key: str, model: str) -> None:
+                self.calls = 0
+                self.analyzed_ranges = []
+
+            def generate_json(self, prompt: str, system_instruction: str, cancel_event=None, debug_path=None):
+                self.calls += 1
+                if "INPUT TRANSCRIPT:\n" not in prompt:
+                    return {}
+                raw = prompt.split("INPUT TRANSCRIPT:\n", 1)[1].split(
+                    "\n\nEXISTING PROJECT CONTEXT", 1
+                )[0]
+                payload = json.loads(raw)
+                if len(payload["segments"]) > 4:
+                    raise GeminiOutputLimitError("finish_reason=MAX_TOKENS")
+                segment_range = payload["chapter_segment_range"]
+                self.analyzed_ranges.append(segment_range)
+                return {
+                    "film_profile": {
+                        "is_partial": True,
+                        "continuity_facts": [
+                            f"Analyzed {segment_range[0]}-{segment_range[1]}"
+                        ],
+                    },
+                    "characters": [],
+                    "relationships": [],
+                    "terminology": [],
+                    "style_guide": {},
+                    "uncertainties": [],
+                }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            transcript_path = root / "split.transcript.json"
+            transcript_path.write_text(
+                json.dumps({
+                    "is_complete": True,
+                    "segments": [
+                        {
+                            "id": index,
+                            "start": float(index),
+                            "end": float(index) + 0.5,
+                            "text": f"Dialogue {index}",
+                        }
+                        for index in range(1, 9)
+                    ],
+                }),
+                encoding="utf-8",
+            )
+            fake_client = AutoSplitContextClient("test", "gemini-3.8-flash")
+            logs = []
+            with patch(
+                "video_translator.gemini.movie_context_service.GeminiJsonClient",
+                return_value=fake_client,
+            ):
+                context_path = MovieContextService(
+                    "test",
+                    "gemini-3.8-flash",
+                    log_callback=logs.append,
+                ).run(transcript_path, batch_segments=40)
+
+            state = json.loads(context_path.read_text(encoding="utf-8"))
+            self.assertTrue(state["is_complete"])
+            self.assertEqual(state["processed_segments"], 8)
+            self.assertEqual(fake_client.calls, 4)
+            self.assertEqual(fake_client.analyzed_ranges, [[1, 4], [5, 8]])
+            self.assertTrue(any("[MAX_TOKENS]" in line for line in logs))
+
+    def test_context_smaller_chapters_resume_from_existing_processed_count(self) -> None:
+        class RecordingContextClient:
+            def __init__(self, api_key: str, model: str) -> None:
+                self.calls = 0
+                self.analyzed_ranges = []
+
+            def generate_json(self, prompt: str, system_instruction: str, cancel_event=None, debug_path=None):
+                self.calls += 1
+                if "INPUT TRANSCRIPT:\n" not in prompt:
+                    return {}
+                raw = prompt.split("INPUT TRANSCRIPT:\n", 1)[1].split(
+                    "\n\nEXISTING PROJECT CONTEXT", 1
+                )[0]
+                payload = json.loads(raw)
+                self.analyzed_ranges.append(payload["chapter_segment_range"])
+                return {
+                    "film_profile": {
+                        "is_partial": True,
+                        "continuity_facts": [
+                            f"Analyzed {payload['chapter_segment_range'][0]}-"
+                            f"{payload['chapter_segment_range'][1]}"
+                        ],
+                    },
+                    "characters": [],
+                    "relationships": [],
+                    "terminology": [],
+                    "style_guide": {},
+                    "uncertainties": [],
+                }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            transcript_path = root / "resume.transcript.json"
+            segments = [
+                {
+                    "id": index,
+                    "start": float(index),
+                    "end": float(index) + 0.5,
+                    "text": f"Dialogue {index}",
+                }
+                for index in range(1, 528)
+            ]
+            transcript_path.write_text(
+                json.dumps({"is_complete": True, "segments": segments}),
+                encoding="utf-8",
+            )
+            paths = MovieProjectPaths.from_transcript(transcript_path)
+            old_model = "gemini-3.6-flash"
+            old_batch_size = 180
+            prompt_signature = (
+                load_prompt("system_prompt.txt")
+                + load_prompt("context_analysis.txt")
+                + load_prompt("context_finalize.txt")
+            )
+            legacy_signature = sha256_text(
+                sha256_file(transcript_path)
+                + old_model
+                + str(old_batch_size)
+                + prompt_signature
+            )
+            paths.context_json.write_text(
+                json.dumps({
+                    "schema_version": 1,
+                    "transcript_fingerprint": sha256_file(transcript_path),
+                    "config_signature": legacy_signature,
+                    "model": old_model,
+                    "batch_segments": old_batch_size,
+                    "processed_segments": 360,
+                    "total_segments": 527,
+                    "is_complete": False,
+                    "profile": {
+                        "film_profile": {
+                            "is_partial": True,
+                            "continuity_facts": ["Fact from first 360 segments"],
+                        },
+                        "characters": [],
+                        "relationships": [],
+                        "terminology": [],
+                        "style_guide": {},
+                        "uncertainties": [],
+                    },
+                    "chapter_responses": {},
+                }),
+                encoding="utf-8",
+            )
+            fake_client = RecordingContextClient("test", "gemini-3.8-flash")
+            logs = []
+            with patch(
+                "video_translator.gemini.movie_context_service.GeminiJsonClient",
+                return_value=fake_client,
+            ):
+                MovieContextService(
+                    "test",
+                    "gemini-3.8-flash",
+                    log_callback=logs.append,
+                ).run(transcript_path, batch_segments=120)
+
+            completed = json.loads(paths.context_json.read_text(encoding="utf-8"))
+            self.assertEqual(
+                fake_client.analyzed_ranges,
+                [[361, 480], [481, 527]],
+            )
+            self.assertEqual(fake_client.calls, 3)
+            self.assertTrue(completed["is_complete"])
+            self.assertEqual(completed["processed_segments"], 527)
+            self.assertIn(
+                "Fact from first 360 segments",
+                completed["profile"]["film_profile"]["continuity_facts"],
+            )
+            self.assertTrue(any("Giữ checkpoint 360/527" in line for line in logs))
 
     def test_translation_preserves_ids_and_source_timestamps(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
