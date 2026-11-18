@@ -109,15 +109,20 @@ class FilmTranslationService:
             if cancel_event.is_set():
                 raise FilmTranslationError("Đã hủy dịch phim.")
 
-            previous_context = source_segments[max(0, start_index - 6):start_index]
-            next_context = source_segments[start_index + len(current):start_index + len(current) + 6]
+            previous_context = self._prompt_segments(
+                source_segments[max(0, start_index - 6):start_index]
+            )
+            current_prompt_segments = self._prompt_segments(current)
+            next_context = self._prompt_segments(
+                source_segments[start_index + len(current):start_index + len(current) + 6]
+            )
             prompt = render_prompt(
                 translation_template,
                 {
                     "CONTEXT_PROFILE_JSON": json.dumps(context, ensure_ascii=False),
                     "PREVIOUS_CONTEXT_JSON": json.dumps(previous_context, ensure_ascii=False),
                     "NEXT_CONTEXT_JSON": json.dumps(next_context, ensure_ascii=False),
-                    "SEGMENTS_JSON": json.dumps(current, ensure_ascii=False),
+                    "SEGMENTS_JSON": json.dumps(current_prompt_segments, ensure_ascii=False),
                 },
             )
             batch_key = f"{ids[0]}-{ids[-1]}"
@@ -296,6 +301,16 @@ class FilmTranslationService:
         self._log(f"Vietnamese SRT: {paths.translated_srt}")
         self._log(f"Quality report: {paths.quality_json}")
         return paths.translated_json, paths.translated_srt, paths.quality_json
+
+    @staticmethod
+    def _prompt_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Keep dialogue and segment timing; omit word-level recognition details."""
+        fields = ("id", "start", "end", "text", "speaker_id")
+        return [
+            {key: item[key] for key in fields if key in item}
+            for item in segments
+            if isinstance(item, dict)
+        ]
 
     @staticmethod
     def _load_or_create_state(
