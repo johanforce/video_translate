@@ -77,17 +77,26 @@ class FilmTranslationService:
         source_fingerprint = sha256_file(paths.transcript_json)
         context_fingerprint = sha256_file(context_path)
         batch_size = max(5, min(int(batch_size), 100))
-        config_signature = sha256_text(
-            source_fingerprint
-            + context_fingerprint
-            + self.model
-            + str(batch_size)
-            + load_prompt("system_prompt.txt")
+        prompt_signature = (
+            load_prompt("system_prompt.txt")
             + load_prompt("translation.txt")
             + load_prompt("quality_control.txt")
         )
+        # Keep accepted translation/QC batches when the selected Gemini model changes.
+        config_signature = sha256_text(
+            source_fingerprint + context_fingerprint + str(batch_size) + prompt_signature
+        )
 
-        state = self._load_or_create_state(paths, config_signature, source_fingerprint, context_fingerprint)
+        state = self._load_or_create_state(
+            paths,
+            config_signature,
+            source_fingerprint,
+            context_fingerprint,
+            batch_size,
+            prompt_signature,
+            self.model,
+        )
+        state["model"] = self.model
         translated_by_id = {
             int(item["id"]): item
             for item in state.get("segments", [])
@@ -318,6 +327,9 @@ class FilmTranslationService:
         signature: str,
         source_fingerprint: str,
         context_fingerprint: str,
+        batch_size: int,
+        prompt_signature: str,
+        current_model: str,
     ) -> dict[str, Any]:
         if paths.translated_json.is_file():
             try:
@@ -326,6 +338,35 @@ class FilmTranslationService:
                 state = {}
             if state.get("config_signature") == signature:
                 return state
+
+            # Migrate projects created before model-independent cache signatures.
+            # Prefer the model recorded in the project; known UI models cover older
+            # checkpoints that were saved before their first completed batch.
+            legacy_models = {
+                str(state.get("model") or ""),
+                current_model,
+                "gemini-3.8-flash",
+                "gemini-3.6-flash",
+                "gemini-3.5-flash",
+                "gemini-3.5-flash-lite",
+                "gemini-2.5-flash",
+                "gemini-2.5-pro",
+            }
+            legacy_models.discard("")
+            legacy_signatures = {
+                sha256_text(
+                    source_fingerprint
+                    + context_fingerprint
+                    + model
+                    + str(batch_size)
+                    + prompt_signature
+                )
+                for model in legacy_models
+            }
+            if state.get("config_signature") in legacy_signatures:
+                state["config_signature"] = signature
+                state["model"] = current_model
+                return state
         return {
             "schema_version": 1,
             "source_transcript": str(paths.transcript_json),
@@ -333,6 +374,7 @@ class FilmTranslationService:
             "source_fingerprint": source_fingerprint,
             "context_fingerprint": context_fingerprint,
             "config_signature": signature,
+            "model": current_model,
             "segments": [],
             "issues": [],
             "pending_batches": {},
