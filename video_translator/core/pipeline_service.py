@@ -10,7 +10,7 @@ from video_translator.core.models import DownloadProgress, TranscriptionProgress
 from video_translator.core.project_manager import ProjectManager
 from video_translator.download.downloader import VideoDownloader
 from video_translator.gemini.film_translation_service import FilmTranslationService
-from video_translator.gemini.json_utils import read_json
+from video_translator.gemini.json_utils import read_json, sha256_text
 from video_translator.gemini.movie_context_service import MovieContextService
 from video_translator.gemini.project_paths import MovieProjectPaths
 from video_translator.rendering.render_service import RenderService
@@ -123,7 +123,16 @@ class ProjectPipelineService:
             recorded_video = Path(
                 str(transcript_data.get("source_video", ""))
             ).expanduser()
-            if not recorded_video.is_file() and current_video.is_file():
+            if (
+                current_video.is_file()
+                and (
+                    not recorded_video.is_file()
+                    or recorded_video.resolve() != current_video.resolve()
+                )
+            ):
+                # Point the transcript at the selected source. The transcription
+                # checkpoint compares content hashes, so the same moved file is reused
+                # while a genuinely different source invalidates dependent stages.
                 transcript_data["source_video"] = str(current_video)
                 self._write_existing_transcript(current_transcript, transcript_data)
 
@@ -241,6 +250,22 @@ class ProjectPipelineService:
             model=gemini_model,
         )
 
+        # Restore the last VieNeu configuration from its manifest if the app was
+        # reopened before the voice catalogue was loaded. This lets an interrupted
+        # TTS project poll the saved jobs instead of requiring the user to guess voice.
+        if paths.tts_manifest.is_file():
+            try:
+                saved_tts = read_json(paths.tts_manifest)
+                current_translation_hash = sha256_text(
+                    paths.translated_json.read_text(encoding="utf-8")
+                )
+                if saved_tts.get("translation_fingerprint") == current_translation_hash:
+                    if not voice_id:
+                        voice_id = str(saved_tts.get("voice_id") or "")
+                        voice_speed = float(saved_tts.get("speed", voice_speed))
+            except (OSError, ValueError, TypeError):
+                pass
+
         # 4. Per-line VieNeu synthesis. The manifest contains request keys and job IDs.
         run_stage(
             "tts",
@@ -268,6 +293,13 @@ class ProjectPipelineService:
                 translated_json=paths.translated_json,
                 subtitle_mode=subtitle_mode,
                 original_audio_mode=original_audio_mode,
+                output_path=(
+                    paths.transcript_json.parent
+                    / (
+                        paths.transcript_json.name.removesuffix(".transcript.json")
+                        + ".vi.dubbed.mp4"
+                    )
+                ),
                 cancel_event=cancel_event,
             ),
             subtitle_mode=subtitle_mode,
@@ -278,7 +310,13 @@ class ProjectPipelineService:
         output = (
             render_result[0]
             if render_result is not None
-            else current_video.parent / f"{current_video.stem}.vi.dubbed.mp4"
+            else (
+                paths.transcript_json.parent
+                / (
+                    paths.transcript_json.name.removesuffix(".transcript.json")
+                    + ".vi.dubbed.mp4"
+                )
+            )
         )
         metadata = (
             render_result[1]
