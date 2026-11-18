@@ -90,11 +90,12 @@ class VieNeuTTSService:
                 existing = read_json(paths.tts_manifest)
             except ValueError:
                 existing = {}
-            if (
-                existing.get("config_signature") == config_signature
-                and existing.get("translation_fingerprint") == translation_fingerprint
-            ):
+            if existing.get("config_signature") == config_signature:
+                # Migrate v0.5 manifests created before translation_fingerprint was stored.
+                # The old config signature already included the same translation hash.
                 manifest = existing
+                manifest["translated_json"] = str(Path(translated_json).resolve())
+                manifest["translation_fingerprint"] = translation_fingerprint
         manifest.setdefault("segments", {})
         paths.tts_dir.mkdir(parents=True, exist_ok=True)
         completed = 0
