@@ -354,6 +354,16 @@ class FilmTranslationService:
             }
             legacy_models.discard("")
             legacy_signatures = {
+                # Previous v0.7 cache signature already excluded the model but
+                # still included batch size.
+                sha256_text(
+                    source_fingerprint
+                    + context_fingerprint
+                    + str(batch_size)
+                    + prompt_signature
+                )
+            }
+            legacy_signatures.update(
                 sha256_text(
                     source_fingerprint
                     + context_fingerprint
@@ -362,7 +372,7 @@ class FilmTranslationService:
                     + prompt_signature
                 )
                 for model in legacy_models
-            }
+            )
             if state.get("config_signature") in legacy_signatures:
                 state["config_signature"] = signature
                 state["model"] = current_model
