@@ -129,7 +129,7 @@ class PipelineStageCacheTests(unittest.TestCase):
                 )
             )
 
-    def test_running_stage_is_not_skipped_after_reopen(self) -> None:
+    def test_completed_artifacts_reconcile_after_project_reopen(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             _, manager = self._prepare_project(Path(temp_dir))
             manager.start_stage("translation")
