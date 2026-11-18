@@ -1145,38 +1145,59 @@ class MainWindow(QMainWindow):
         stages = self.project_manager.state.get("stages", {})
 
         transcription = stages.get("transcription", {})
-        whisper_model = transcription.get("model")
+        context = stages.get("context", {})
+        translation = stages.get("translation", {})
+
+        try:
+            transcript_data = json.loads(transcript_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            transcript_data = {}
+
+        whisper_model = transcription.get("model") or transcript_data.get("model")
         if whisper_model:
             index = self.model_combo.findData(str(whisper_model))
             if index >= 0:
                 self.model_combo.setCurrentIndex(index)
 
-        try:
-            transcript_data = json.loads(transcript_path.read_text(encoding="utf-8"))
-            requested_language = transcript_data.get("requested_language")
-            if requested_language:
-                language_index = self.language_combo.findData(
-                    "auto" if requested_language == "auto" else str(requested_language)
-                )
-                if language_index >= 0:
-                    self.language_combo.setCurrentIndex(language_index)
-        except (OSError, ValueError):
-            pass
+        requested_language = (
+            transcription.get("requested_language")
+            or transcript_data.get("requested_language")
+        )
+        if requested_language:
+            language_index = self.language_combo.findData(str(requested_language))
+            if language_index >= 0:
+                self.language_combo.setCurrentIndex(language_index)
 
-        context = stages.get("context", {})
-        translation = stages.get("translation", {})
+        context_state: dict = {}
+        if paths.context_json.is_file():
+            try:
+                context_state = json.loads(paths.context_json.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                context_state = {}
+        translation_state: dict = {}
+        if paths.translated_json.is_file():
+            try:
+                translation_state = json.loads(paths.translated_json.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                translation_state = {}
+
         gemini_model = (
             translation.get("model")
             or context.get("model")
+            or translation_state.get("model")
+            or context_state.get("model")
         )
         if gemini_model:
             index = self.gemini_model_combo.findData(str(gemini_model))
             if index >= 0:
                 self.gemini_model_combo.setCurrentIndex(index)
 
-        batch_size = translation.get("batch_size")
+        batch_size = (
+            translation.get("batch_size")
+            or translation_state.get("batch_size")
+        )
         if batch_size is None:
-            chapter_size = context.get("batch_segments")
+            chapter_size = context.get("batch_segments") or context_state.get("batch_segments")
             if chapter_size:
                 batch_size = max(5, min(100, int(chapter_size) // 6))
         if batch_size is not None:
@@ -1220,6 +1241,21 @@ class MainWindow(QMainWindow):
         render = stages.get("render", {})
         subtitle_mode = render.get("subtitle_mode")
         original_audio_mode = render.get("original_audio_mode")
+        if not subtitle_mode or not original_audio_mode:
+            output = paths.transcript_json.parent / (
+                paths.transcript_json.name.removesuffix(".transcript.json")
+                + ".vi.dubbed.mp4"
+            )
+            metadata_path = output.with_suffix(".render.json")
+            if metadata_path.is_file():
+                try:
+                    render_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                    subtitle_mode = subtitle_mode or render_metadata.get("subtitle_mode")
+                    original_audio_mode = (
+                        original_audio_mode or render_metadata.get("original_audio_mode")
+                    )
+                except (OSError, ValueError):
+                    pass
         if subtitle_mode:
             index = self.subtitle_mode_combo.findData(str(subtitle_mode))
             if index >= 0:
