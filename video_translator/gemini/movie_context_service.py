@@ -192,25 +192,6 @@ class MovieContextService:
 
         state["config_signature"] = config_signature
 
-        profile = self._normalize_profile(state.get("profile"))
-        processed = int(state.get("processed_segments", 0) or 0)
-        processed = min(processed, len(segments))
-        if (
-            state.get("config_signature") == config_signature
-            and state.get("is_complete") is True
-            and processed == len(segments)
-            and isinstance(state.get("profile"), dict)
-        ):
-            self._emit(
-                TranscriptionProgress(
-                    100,
-                    "Context Profile đã hoàn tất; không cần gọi Gemini lại.",
-                    len(segments),
-                )
-            )
-            self._log(f"Đã dùng lại Context Profile: {paths.context_json}")
-            return paths.context_json
-
         self._log(f"Phân tích {len(segments)} segment thành {len(batches)} chapter.")
         self._log(
             "Resume context: "
