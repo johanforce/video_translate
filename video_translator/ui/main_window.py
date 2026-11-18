@@ -810,10 +810,6 @@ class MainWindow(QMainWindow):
 
     def _start_full_pipeline(self) -> None:
         output_text = self.output_input.text().strip()
-        if not output_text:
-            QMessageBox.warning(self, "Thiếu thư mục", "Hãy chọn thư mục dự án.")
-            self.tabs.setCurrentIndex(0)
-            return
 
         transcript_text = (
             self.project_transcript_input.text().strip()
@@ -854,6 +850,10 @@ class MainWindow(QMainWindow):
 
         # Project discovery may have switched to the folder containing the saved transcript.
         output_text = self.output_input.text().strip()
+        if not output_text:
+            QMessageBox.warning(self, "Thiếu thư mục", "Hãy chọn thư mục dự án.")
+            self.tabs.setCurrentIndex(0)
+            return
         if transcript_path is None and video_path is None and not video_url:
             QMessageBox.warning(
                 self,
