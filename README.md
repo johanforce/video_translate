@@ -1,115 +1,144 @@
 # VideoTranslator
 
-Python desktop application for translating and dubbing authorized YouTube/Bilibili video content into Vietnamese.
+Ứng dụng desktop Python hỗ trợ dịch thoại phim theo ngữ cảnh và tạo giọng thuyết minh tiếng Việt.
 
-The application is developed incrementally. The current version includes video downloading and timestamped speech transcription. Gemini film-context analysis, Vietnamese dialogue translation, VieNeu dubbing, and final rendering are subsequent milestones.
+## Phiên bản hiện tại
 
-## Current milestone
+### v0.1 — Download
+- YouTube và Bilibili qua yt-dlp.
+- MP4, ưu tiên nguồn tối đa 1080p; không upscale nguồn thấp hơn.
+- FFmpeg ghép/remux audio và video.
 
-### v0.1 — Project foundation and video downloader
-- PySide6 desktop interface.
-- YouTube and Bilibili URL validation.
-- Video download through yt-dlp.
-- Prefer source streams at or below 1080p; never upscale lower-resolution sources.
-- Merge/remux to MP4 using FFmpeg.
+### v0.2 — Transcription
+- FFmpeg trích xuất mono 16 kHz WAV.
+- faster-whisper nhận diện lời thoại.
+- Tự nhận diện hoặc chọn ngôn ngữ nguồn.
+- Timestamp theo đoạn và theo từ.
+- Xuất transcript JSON và SRT gốc.
 
-### v0.2 — Audio extraction and Whisper transcription
-- Extract the first audio stream using FFmpeg.
-- Normalize to mono, 16 kHz PCM WAV in a temporary workspace.
-- Transcribe with faster-whisper.
-- Automatic language detection or manual source-language selection.
-- Segment-level timestamps and optional word-level timestamps.
-- Export UTF-8 transcript JSON and source-language SRT.
-- Run transcription in a background worker and allow cancellation between processing stages/segments.
+### v0.3 — Movie Context
+- Gemini đọc transcript theo chapter.
+- Tạo Context Profile gồm nội dung phim, nhân vật, quan hệ, cách xưng hô, thuật ngữ, mạch liên tục và điểm chưa chắc chắn.
+- Lưu checkpoint theo chapter; có thể chạy lại sau lỗi.
+- Nếu transcript không đổi và profile đã hoàn tất, ứng dụng tái sử dụng kết quả, không gọi Gemini lần nữa.
 
-The default model is \`small\`. The first run downloads the selected Whisper model and may take additional time. Larger models can improve recognition quality but require more memory and processing time.
+### v0.4 — Film Translation
+- Dịch lời thoại theo batch, có context profile và các câu lân cận.
+- Việt hóa tự nhiên cho lồng tiếng, giữ tính cách và cảm xúc nhân vật.
+- Kiểm tra chất lượng từng batch.
+- Từ chối kết quả nếu Gemini làm đổi ID, thứ tự, số lượng hoặc timestamp.
+- Xuất JSON tiếng Việt, SRT tiếng Việt và báo cáo QC.
+- Lưu checkpoint; chỉ dịch lại batch còn thiếu khi chạy tiếp.
 
-## Requirements
+### v0.5 — VieNeu TTS
+- Lấy danh mục giọng v4 trực tiếp từ VieNeu.
+- Tạo một audio riêng cho mỗi câu thoại tiếng Việt.
+- Điều chỉnh tốc độ đọc.
+- Lưu manifest, job ID và idempotency key.
+- Bỏ qua audio đã hoàn thành; tiếp tục poll job còn dang dở sau khi mở lại.
+- Cảnh báo số request trước khi tạo giọng.
 
-- Python 3.10 or newer.
-- FFmpeg available on PATH.
-- Internet access for downloading video and the Whisper model on first use.
-- Access to the video and permission to download/process it.
+Lưu ý: v0.5 tạo audio cho từng câu thoại. Ghép audio theo timeline, mix âm thanh gốc và render MP4 sẽ được làm ở v0.6.
 
-## Setup
+## Yêu cầu
 
-### Windows
+- Python 3.10+.
+- FFmpeg có cả ffmpeg và ffprobe trên PATH.
+- Gemini API key.
+- VieNeu Cloud API key.
+- Kết nối mạng để tải video, model Whisper lần đầu và gọi API.
+
+## Cài đặt Windows
 
 \`\`\`powershell
 py -3.11 -m venv .venv
 .venv\\Scripts\\Activate.ps1
 python -m pip install --upgrade pip
 pip install -r requirements.txt
+Copy-Item .env.example .env
 python main.py
 \`\`\`
 
-### macOS / Linux
+Mở file .env và điền GEMINI_API_KEY, VIENEU_API_KEY. Không commit file .env.
+
+## macOS / Linux
 
 \`\`\`bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+cp .env.example .env
 python main.py
 \`\`\`
 
-## v0.2 usage
+Điền API keys vào .env trước khi chạy Gemini/VieNeu.
 
-1. Paste a YouTube/Bilibili URL and click **Tải MP4 tối đa 1080p**, or choose a local video file.
-2. Select a Whisper model. \`small\` is the default balance of quality and speed.
-3. Leave language set to **Tự nhận diện**, or choose the known source language.
-4. Click **Nhận diện lời thoại**.
-5. The output folder receives:
-   - \`<video-name>.transcript.json\` — language metadata, segments, timestamps, and word timings.
-   - \`<video-name>.source.srt\` — source-language subtitles.
+## Quy trình sử dụng
 
-The JSON is the canonical input for later Gemini context analysis and translation. Segment IDs are assigned in chronological order. Speaker IDs remain null because this milestone does not perform speaker diarization.
+1. Tab **Video & Transcript**: tải video hoặc chọn file có sẵn; chạy Whisper và tạo transcript.
+2. Tab **Gemini Dịch phim**: chọn API key/model; chạy **Phân tích toàn phim** trước.
+3. Sau khi Context Profile hoàn tất, chạy **Dịch phim + kiểm tra**.
+4. Tab **VieNeu Thuyết minh**: tải danh sách giọng v4, chọn giọng/tốc độ và tạo audio theo từng câu thoại.
 
-## Run tests
+## File đầu ra
+
+Với video movie.mp4, các file chính được lưu trong thư mục dự án:
+
+- movie.transcript.json — transcript gốc, timestamp và word timings.
+- movie.source.srt — phụ đề ngôn ngữ gốc.
+- movie.context.json — Context Profile và checkpoint phân tích.
+- movie.vi.translation.json — bản dịch theo segment, metadata cảm xúc và trạng thái.
+- movie.vi.srt — phụ đề tiếng Việt.
+- movie.vi.quality.json — lỗi và báo cáo kiểm tra chất lượng.
+- movie.tts/manifest.json — trạng thái tạo giọng.
+- movie.tts/segment_*.mp3|wav|... — audio từng câu (phần mở rộng theo định dạng trả về).
+
+## Model Whisper
+
+Mặc định là small. medium và large-v3 thường cần nhiều RAM/VRAM hơn và xử lý chậm hơn. Lần đầu chọn model sẽ tải model về máy.
+
+## API cost và giới hạn
+
+- Gemini được gọi theo chapter để phân tích context; dịch và QC là hai lượt xử lý cho mỗi batch.
+- VieNeu tạo một job cho mỗi câu thoại có nội dung; chi phí phụ thuộc số ký tự và gói VieNeu.
+- Ứng dụng hiển thị số segment trước khi gọi TTS. Hãy kiểm tra quota và chi phí tài khoản VieNeu.
+- Dừng tác vụ không xóa các job đã gửi lên nhà cung cấp. Manifest giữ ID để có thể tiếp tục poll.
+
+## Kiểm thử
 
 \`\`\`bash
+python -m compileall -q main.py video_translator tests
 python -m unittest discover -s tests -v
 \`\`\`
 
-## Download behavior
+CI chạy trên Python 3.11 và 3.12.
 
-- The downloader selects the best available video/audio streams with a maximum source height of 1080p.
-- MP4-compatible streams are preferred; FFmpeg is used to merge/remux streams.
-- If the source is only 720p (or lower), the output remains at that source resolution.
-- Playlist downloads are disabled.
-- The downloader does not bypass DRM, paywalls, or platform access controls.
-
-## Gemini film translation design
-
-Prompt assets are located in \`video_translator/prompts/\`. The next translation milestones will:
-1. Analyze the transcript and build a persistent film context profile.
-2. Translate timestamped batches using that profile and neighboring dialogue.
-3. Check omissions, terminology, character consistency, natural spoken Vietnamese, and dubbing suitability.
-
-## Project structure
+## Kiến trúc
 
 \`\`\`text
 video_translator/
-  config/          Application settings
-  core/            Shared data models and exceptions
-  download/        YouTube/Bilibili downloader
-  transcription/   FFmpeg extraction, faster-whisper, JSON/SRT
-  prompts/         Gemini film-translation prompt assets
-  ui/              PySide6 interface and background workers
-tests/             Unit tests
-main.py            Application entry point
+  config/          Runtime settings
+  core/            Models and errors
+  download/        yt-dlp
+  transcription/   FFmpeg + faster-whisper + JSON/SRT
+  prompts/         Film translation prompts
+  gemini/          Context analysis + translation + QC
+  tts/             VieNeu v4 async TTS
+  ui/              PySide6 + background workers
+tests/
+main.py
 \`\`\`
 
 ## Roadmap
 
-- [x] 0.1 Foundation, desktop shell, and video downloader
-- [x] 0.2 Audio extraction and Whisper transcription with timestamps
-- [ ] 0.3 Gemini film-context analysis and context profile
-- [ ] 0.4 Contextual Vietnamese film translation and quality control
-- [ ] 0.5 VieNeu TTS integration
-- [ ] 0.6 Audio timeline, subtitles, and FFmpeg rendering
-- [ ] 0.7 Project history, resume/cache, preview, and packaging
+- [x] 0.1 Download and desktop foundation
+- [x] 0.2 Audio extraction and transcription
+- [x] 0.3 Gemini movie context
+- [x] 0.4 Contextual translation and QC
+- [x] 0.5 VieNeu TTS per dialogue segment
+- [ ] 0.6 Audio timeline, subtitle mux/burn, final MP4 rendering
+- [ ] 0.7 Project history, editing, preview, packaging
 
-## Security
+## Quyền sử dụng nội dung
 
-Store API keys in environment variables or a local \`.env\` file. Never commit real API keys, cookies, or private credentials.
+Chỉ tải và xử lý video mà bạn có quyền sử dụng; không vượt DRM, paywall hoặc cơ chế kiểm soát truy cập của nền tảng.
