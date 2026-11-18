@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
@@ -29,6 +30,7 @@ from video_translator.core.project_manager import ProjectManager
 from video_translator.gemini.project_paths import MovieProjectPaths
 from video_translator.ui.download_worker import DownloadWorker
 from video_translator.ui.gemini_worker import GeminiWorker
+from video_translator.ui.pipeline_worker import PipelineWorker
 from video_translator.ui.render_worker import RenderWorker
 from video_translator.ui.transcription_worker import TranscriptionWorker
 from video_translator.ui.vieneu_worker import TTSWorker, VoiceListWorker
@@ -44,6 +46,7 @@ class MainWindow(QMainWindow):
             | GeminiWorker
             | TTSWorker
             | RenderWorker
+            | PipelineWorker
             | None
         ) = None
         self.voice_worker: VoiceListWorker | None = None
@@ -298,7 +301,8 @@ class MainWindow(QMainWindow):
 
         self.gemini_model_combo = QComboBox()
         for label, value in (
-            ("Gemini 3.6 Flash — khuyến nghị", "gemini-3.6-flash"),
+            ("Gemini 3.8 Flash — khuyến nghị", "gemini-3.8-flash"),
+            ("Gemini 3.6 Flash", "gemini-3.6-flash"),
             ("Gemini 3.5 Flash", "gemini-3.5-flash"),
             ("Gemini 3.5 Flash-Lite", "gemini-3.5-flash-lite"),
             ("Gemini 2.5 Flash", "gemini-2.5-flash"),
@@ -425,7 +429,7 @@ class MainWindow(QMainWindow):
         project_buttons = QHBoxLayout()
         self.project_refresh_button = QPushButton("Kiểm tra checkpoint")
         self.project_refresh_button.clicked.connect(self._refresh_project)
-        self.resume_button = QPushButton("Tiếp tục bước còn thiếu")
+        self.resume_button = QPushButton("Chạy toàn bộ / Tiếp tục project")
         self.resume_button.setObjectName("primaryButton")
         self.resume_button.clicked.connect(self._resume_project)
         project_buttons.addWidget(self.project_refresh_button)
@@ -722,44 +726,164 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def _resume_project(self) -> None:
-        self._refresh_project()
-        if not self.project_manager:
-            QMessageBox.warning(self, "Chưa có project", "Hãy mở transcript JSON của project.")
-            return
-        stage = self.project_manager.next_incomplete_stage()
-        if stage is None:
-            QMessageBox.information(self, "Project hoàn tất", "Tất cả công đoạn đã hoàn thành.")
-        elif stage == "transcription":
-            video_path = Path(self.video_input.text().strip()).expanduser()
-            if not video_path.is_file():
-                QMessageBox.information(
-                    self, "Thiếu video nguồn",
-                    "Chọn video ở tab đầu tiên rồi tiếp tục nhận diện lời thoại.",
-                )
-                self.tabs.setCurrentIndex(0)
-            else:
-                self._start_transcription()
-        elif stage == "context":
-            self.tabs.setCurrentIndex(1)
-            self._start_gemini("context")
-        elif stage == "translation":
-            self.tabs.setCurrentIndex(1)
-            self._start_gemini("translate")
-        elif stage == "tts":
-            self.tabs.setCurrentIndex(2)
-            if not self.voice_combo.currentData():
-                self._refresh_voices()
-                QMessageBox.information(
-                    self, "Chọn giọng VieNeu",
-                    "Đã tải danh sách giọng nếu API key hợp lệ. Chọn giọng rồi nhấn Tiếp tục bước còn thiếu.",
-                )
-            else:
-                self._start_tts()
-        elif stage == "render":
-            self.tabs.setCurrentIndex(3)
-            self._start_render()
+        self._start_full_pipeline()
 
-    def _connect_common_worker(self, worker: QWidget) -> None:
+    def _start_full_pipeline(self) -> None:
+        output_text = self.output_input.text().strip()
+        if not output_text:
+            QMessageBox.warning(self, "Thiếu thư mục", "Hãy chọn thư mục dự án.")
+            self.tabs.setCurrentIndex(0)
+            return
+
+        transcript_text = (
+            self.project_transcript_input.text().strip()
+            or self.transcript_input.text().strip()
+        )
+        transcript_path = Path(transcript_text).expanduser() if transcript_text else None
+        if transcript_path is not None and not transcript_path.is_file():
+            transcript_path = None
+
+        video_text = self.video_input.text().strip()
+        video_path = Path(video_text).expanduser() if video_text else None
+        if video_path is not None and not video_path.is_file():
+            video_path = None
+        video_url = self.url_input.text().strip()
+
+        if transcript_path is None and video_path is None and not video_url:
+            QMessageBox.warning(
+                self,
+                "Thiếu đầu vào",
+                "Chọn video, nhập URL YouTube/Bilibili hoặc mở transcript của project.",
+            )
+            self.tabs.setCurrentIndex(0)
+            return
+
+        gemini_key = (
+            self.gemini_key_input.text().strip()
+            or os.getenv("GEMINI_API_KEY", "").strip()
+        )
+        vieneu_key = (
+            self.vieneu_key_input.text().strip()
+            or os.getenv("VIENEU_API_KEY", "").strip()
+        )
+        source_language = self.language_combo.currentData()
+        if source_language == "auto":
+            source_language = None
+
+        selected_voice = self.voice_combo.currentData()
+        voice_id = str(selected_voice) if selected_voice else ""
+        speed = float(self.voice_speed_spin.value())
+
+        # When reopening a project, the user may not have loaded the VieNeu catalogue.
+        # Reuse the saved voice configuration for a matching transcript/translation.
+        if transcript_path is not None and transcript_path.is_file():
+            try:
+                project_paths = MovieProjectPaths.from_transcript(transcript_path)
+                if project_paths.tts_manifest.is_file():
+                    tts_state = json.loads(
+                        project_paths.tts_manifest.read_text(encoding="utf-8")
+                    )
+                    if not voice_id:
+                        voice_id = str(tts_state.get("voice_id") or "")
+                        speed = float(tts_state.get("speed", speed))
+                        voice_index = self.voice_combo.findData(voice_id)
+                        if voice_index >= 0:
+                            self.voice_combo.setCurrentIndex(voice_index)
+                        self.voice_speed_spin.setValue(speed)
+            except (OSError, ValueError, TypeError):
+                pass
+
+        # Existing completed TTS cache is not billed again. For a new TTS stage,
+        # warn before submitting any voice jobs because the service may charge by text.
+        pending_voice_count = None
+        if transcript_path is not None and transcript_path.is_file():
+            try:
+                project_paths = MovieProjectPaths.from_transcript(transcript_path)
+                translation_state = json.loads(
+                    project_paths.translated_json.read_text(encoding="utf-8")
+                ) if project_paths.translated_json.is_file() else {}
+                tts_state = json.loads(
+                    project_paths.tts_manifest.read_text(encoding="utf-8")
+                ) if project_paths.tts_manifest.is_file() else {}
+                if translation_state and tts_state.get("is_complete") is not True:
+                    cached = tts_state.get("segments", {})
+                    pending_voice_count = sum(
+                        1 for segment in translation_state.get("segments", [])
+                        if isinstance(segment, dict)
+                        and str(segment.get("translated_text", "")).strip()
+                        and not (
+                            isinstance(cached.get(str(segment.get("id"))), dict)
+                            and cached[str(segment.get("id"))].get("status") == "completed"
+                            and Path(str(cached[str(segment.get("id"))].get("audio_path", ""))).is_file()
+                        )
+                    )
+            except (OSError, ValueError, TypeError, AttributeError):
+                pass
+
+        message = (
+            "Chạy hoặc tiếp tục toàn bộ quy trình. Các transcript, chapter Gemini, "
+            "batch dịch/QC, job VieNeu và audio đã hoàn thành sẽ được dùng lại từ cache."
+        )
+        if pending_voice_count:
+            message += (
+                f"\n\nHiện có tối đa {pending_voice_count} câu cần tạo giọng mới. "
+                "VieNeu có thể tính phí theo ký tự; các job đã nhận sẽ được resume bằng job ID cũ."
+            )
+        answer = QMessageBox.question(
+            self,
+            "Chạy / tiếp tục project",
+            message + "\n\nTiếp tục?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        self._begin_task("Đang kiểm tra cache và khôi phục project...")
+        self._active_stage = None
+        self.worker = PipelineWorker(
+            output_dir=Path(output_text).expanduser(),
+            video_path=video_path,
+            video_url=video_url,
+            transcript_path=transcript_path,
+            whisper_model=str(self.model_combo.currentData()),
+            source_language=source_language,
+            gemini_api_key=gemini_key,
+            gemini_model=str(self.gemini_model_combo.currentData()),
+            translation_batch_size=self.translation_batch_spin.value(),
+            vieneu_api_key=vieneu_key,
+            voice_id=voice_id,
+            voice_speed=speed,
+            subtitle_mode=str(self.subtitle_mode_combo.currentData()),
+            original_audio_mode=str(self.original_audio_combo.currentData()),
+        )
+        self._connect_common_worker(self.worker)
+        self.worker.succeeded.connect(self._on_pipeline_success)
+        self.worker.start()
+
+    def _on_pipeline_success(self, result: dict[str, str]) -> None:
+        transcript = Path(result["transcript"])
+        self.transcript_input.setText(str(transcript))
+        self.project_transcript_input.setText(str(transcript))
+        self.translation_input.setText(result["translation"])
+        self.render_translation_input.setText(result["translation"])
+        self.video_input.setText(str(
+            json.loads(transcript.read_text(encoding="utf-8")).get("source_video", "")
+        ))
+        self._set_project_source(transcript)
+        self.status_label.setText("Toàn bộ quy trình đã hoàn tất.")
+        self._append_log(f"MP4: {result['video']}")
+        self._append_log(f"Phụ đề Việt: {result['subtitle']}")
+        self._append_log(f"Project state: {result['project']}")
+        self._refresh_project()
+        self._update_action_states()
+        QMessageBox.information(
+            self,
+            "Video đã hoàn tất",
+            f"MP4: {result['video']}\n\nPhụ đề: {result['subtitle']}",
+        )
+
+    def _connect_common_worker(self, worker: object) -> None:
         if hasattr(worker, "progress_changed"):
             worker.progress_changed.connect(self._on_progress)
         if hasattr(worker, "log_message"):
@@ -1050,7 +1174,14 @@ class MainWindow(QMainWindow):
             transcript = Path(self.transcript_input.text().strip()).expanduser()
         if not transcript.is_file():
             self.project_status_label.setText("Chưa nạp project. Chọn transcript JSON đã tạo ở bước Whisper.")
-            self.resume_button.setEnabled(False)
+            has_input = (
+                Path(self.video_input.text().strip()).expanduser().is_file()
+                or bool(self.url_input.text().strip())
+            )
+            self.resume_button.setEnabled(not self._busy and has_input)
+            self.project_status_label.setText(
+                "Chưa có transcript. Nhấn Chạy toàn bộ để tạo project mới từ video hoặc URL."
+            )
             return
         try:
             self.project_manager = ProjectManager(transcript)
@@ -1074,6 +1205,11 @@ class MainWindow(QMainWindow):
             lines.append(f"Project state: {self.project_manager.project_file}")
             next_stage = self.project_manager.next_incomplete_stage()
             self.resume_button.setEnabled(not self._busy and next_stage is not None)
+            self.resume_button.setText(
+                "Chạy toàn bộ / Tiếp tục project"
+                if next_stage is not None
+                else "Project đã hoàn tất"
+            )
             if next_stage is None:
                 lines.append("Trạng thái: TẤT CẢ CÔNG ĐOẠN ĐÃ HOÀN THÀNH")
             else:
@@ -1113,6 +1249,18 @@ class MainWindow(QMainWindow):
                 except (OSError, ValueError):
                     has_context = False
         self.transcribe_button.setEnabled(not self._busy and video_path.is_file())
+        has_pipeline_input = (
+            video_path.is_file()
+            or bool(self.url_input.text().strip())
+            or transcript_path.is_file()
+            or Path(self.project_transcript_input.text().strip()).expanduser().is_file()
+        )
+        next_stage = (
+            self.project_manager.next_incomplete_stage()
+            if self.project_manager is not None
+            else "transcription" if has_pipeline_input else None
+        )
+        self.resume_button.setEnabled(not self._busy and has_pipeline_input and next_stage is not None)
         self.context_button.setEnabled(not self._busy and has_transcript)
         self.translate_button.setEnabled(not self._busy and has_transcript and has_context)
         self.tts_button.setEnabled(
