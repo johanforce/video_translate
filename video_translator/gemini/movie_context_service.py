@@ -8,6 +8,7 @@ from typing import Any, Callable
 from video_translator.core.errors import VideoTranslatorError
 from video_translator.core.models import TranscriptionProgress
 from video_translator.gemini.client import GeminiJsonClient, GeminiOutputLimitError
+from video_translator.gemini.context_compactor import compact_context_profile
 from video_translator.gemini.json_utils import (
     read_json,
     sha256_file,
@@ -107,8 +108,9 @@ class MovieContextService:
 
         system_prompt = load_prompt("system_prompt.txt")
         analysis_template = load_prompt("context_analysis.txt")
-        finalize_template = load_prompt("context_finalize.txt")
-        prompt_signature = system_prompt + analysis_template + finalize_template
+        # Final consolidation is deterministic locally; do not pay for a second
+        # model call that mostly re-echoes the accumulated profile.
+        prompt_signature = system_prompt + analysis_template
         # Model and chapter size are execution settings, not profile identity.
         # A model switch or smaller chapter size must preserve accepted chapters.
         config_signature = sha256_text(fingerprint + prompt_signature)
@@ -231,18 +233,17 @@ class MovieContextService:
                 return current_profile
 
             chapter_payload = {
-                "chapter_index": batch_index + 1,
-                "chapter_count": len(batches),
                 "chapter_segment_range": [chunk_start + 1, chunk_end],
-                "first_segment_id": chunk[0].get("id"),
-                "last_segment_id": chunk[-1].get("id"),
-                "transcript_is_complete_input": len(batches) == 1,
                 "segments": self._prompt_segments(chunk),
             }
+            compact_profile = compact_context_profile(
+                current_profile,
+                include_uncertainties=True,
+            )
             chapter_signature = sha256_text(
                 config_signature
                 + json.dumps(chapter_payload, ensure_ascii=False, sort_keys=True)
-                + json.dumps(current_profile, ensure_ascii=False, sort_keys=True)
+                + json.dumps(compact_profile, ensure_ascii=False, sort_keys=True)
             )
             is_original_chapter = (
                 chunk_start == base_chunk_start and chunk_end == base_chunk_end
@@ -271,7 +272,7 @@ class MovieContextService:
                     {
                         "TRANSCRIPT_JSON": json.dumps(chapter_payload, ensure_ascii=False),
                         "CONTEXT_PROFILE_JSON": json.dumps(
-                            current_profile, ensure_ascii=False
+                            compact_profile, ensure_ascii=False
                         ),
                     },
                 )
@@ -293,6 +294,7 @@ class MovieContextService:
                         system_prompt,
                         cancel_event=cancel_event,
                         debug_path=debug_path,
+                        max_output_tokens=4096,
                     )
                 except GeminiOutputLimitError as exc:
                     if len(chunk) <= 1:
@@ -385,46 +387,11 @@ class MovieContextService:
         if cancel_event.is_set():
             raise MovieContextError("Đã hủy phân tích ngữ cảnh phim.")
 
-        finalize_prompt = render_prompt(
-            finalize_template,
-            {
-                "CONTEXT_PROFILE_JSON": json.dumps(profile, ensure_ascii=False),
-                "SEGMENT_COUNT": str(len(segments)),
-            },
-        )
-        cached_finalize = state.get("finalize_response")
-        if (
-            state.get("finalize_signature") == config_signature
-            and isinstance(cached_finalize, dict)
-        ):
-            self._log("Dùng cache phản hồi hợp nhất Context Profile.")
-            finalized = cached_finalize
-        else:
-            self._log("Gemini đang hợp nhất nhân vật, quan hệ và thuật ngữ...")
-            debug_path = paths.context_json.with_name(
-                f"{paths.context_json.stem}.finalize.raw.txt"
-            )
-            try:
-                finalized = self.client.generate_json(
-                    finalize_prompt,
-                    system_prompt,
-                    cancel_event=cancel_event,
-                    debug_path=debug_path,
-                )
-            except GeminiOutputLimitError as exc:
-                self._log(
-                    "Gemini chạm MAX_TOKENS khi hợp nhất Context Profile; "
-                    "dùng kết quả hợp nhất cục bộ đã chống trùng lặp. "
-                    f"Chi tiết: {exc}"
-                )
-                finalized = {}
-            else:
-                # Save the final API response before normalizing/writing the completed profile.
-                state["finalize_signature"] = config_signature
-                state["finalize_response"] = finalized
-                write_json_atomic(paths.context_json, state)
-
-        profile = self._merge_profiles(profile, finalized)
+        # Chapter responses are incremental and _merge_profiles performs local
+        # de-duplication. A second Gemini call would repeat the whole profile with
+        # little new information, so finalize deterministically without an API call.
+        state.pop("finalize_response", None)
+        state.pop("finalize_signature", None)
         profile["film_profile"]["is_partial"] = False
         state.update(
             {
@@ -451,7 +418,7 @@ class MovieContextService:
     @staticmethod
     def _prompt_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Exclude verbose word timings; Gemini needs dialogue-level context only."""
-        fields = ("id", "start", "end", "text", "speaker_id")
+        fields = ("id", "text", "speaker_id")
         return [
             {key: item[key] for key in fields if key in item}
             for item in segments
