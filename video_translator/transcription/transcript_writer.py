@@ -18,17 +18,19 @@ def format_srt_timestamp(seconds: float) -> str:
 
 def render_srt(document: TranscriptDocument) -> str:
     blocks: list[str] = []
-    for index, segment in enumerate(document.segments, start=1):
-        text = segment.text.strip().replace("\\r\\n", "\\n").replace("\\r", "\\n")
+    cue_number = 0
+    for segment in document.segments:
+        text = segment.text.strip().replace("\r\n", "\n").replace("\r", "\n")
         if not text:
             continue
+        cue_number += 1
         blocks.append(
-            f"{index}\\n"
+            f"{cue_number}\n"
             f"{format_srt_timestamp(segment.start)} --> "
-            f"{format_srt_timestamp(segment.end)}\\n"
+            f"{format_srt_timestamp(segment.end)}\n"
             f"{text}"
         )
-    return "\\n\\n".join(blocks) + ("\\n" if blocks else "")
+    return "\n\n".join(blocks) + ("\n" if blocks else "")
 
 
 def save_transcript(
@@ -80,5 +82,5 @@ def save_transcript(
 
 def _atomic_write(path: Path, content: str) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(content, encoding="utf-8", newline="\\n")
+    temporary.write_text(content, encoding="utf-8", newline="\n")
     temporary.replace(path)
