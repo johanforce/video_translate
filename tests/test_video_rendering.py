@@ -7,6 +7,7 @@ from pathlib import Path
 
 from video_translator.gemini.json_utils import sha256_text
 from video_translator.gemini.project_paths import MovieProjectPaths
+from video_translator.rendering.audio_timeline import AudioTimelineBuilder
 from video_translator.rendering.media_tools import probe_media
 from video_translator.rendering.video_renderer import VideoRenderer
 
@@ -132,6 +133,14 @@ class VideoRenderingTests(unittest.TestCase):
             self.assertEqual(second_output, output_path)
             self.assertEqual(second_metadata, metadata_path)
             self.assertTrue(second_cached)
+
+            # Timeline cache is independent from final MP4 cache and must be safe
+            # to reuse when a new render configuration is selected.
+            cached_voice, cached_timeline = AudioTimelineBuilder().build(
+                paths.translated_json
+            )
+            self.assertTrue(cached_voice.is_file())
+            self.assertTrue(cached_timeline.is_file())
 
 
 if __name__ == "__main__":
