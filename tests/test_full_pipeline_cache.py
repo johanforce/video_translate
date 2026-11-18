@@ -6,6 +6,7 @@ from pathlib import Path
 from video_translator.core.pipeline_service import ProjectPipelineService
 from video_translator.gemini.json_utils import sha256_file, sha256_text
 from video_translator.gemini.project_paths import MovieProjectPaths
+from video_translator.gemini.prompt_loader import load_prompt
 
 
 class FullPipelineCacheTests(unittest.TestCase):
@@ -27,10 +28,19 @@ class FullPipelineCacheTests(unittest.TestCase):
                 encoding="utf-8",
             )
             paths = MovieProjectPaths.from_transcript(transcript)
+            context_signature = sha256_text(
+                sha256_file(transcript)
+                + "gemini-test"
+                + "180"
+                + load_prompt("system_prompt.txt")
+                + load_prompt("context_analysis.txt")
+                + load_prompt("context_finalize.txt")
+            )
             paths.context_json.write_text(
                 json.dumps({
                     "is_complete": True,
                     "transcript_fingerprint": sha256_file(transcript),
+                    "config_signature": context_signature,
                     "model": "gemini-test",
                     "batch_segments": 180,
                     "processed_segments": 1,
@@ -39,12 +49,22 @@ class FullPipelineCacheTests(unittest.TestCase):
                 }),
                 encoding="utf-8",
             )
+            translation_signature = sha256_text(
+                sha256_file(transcript)
+                + sha256_file(paths.context_json)
+                + "gemini-test"
+                + "30"
+                + load_prompt("system_prompt.txt")
+                + load_prompt("translation.txt")
+                + load_prompt("quality_control.txt")
+            )
             paths.translated_json.write_text(
                 json.dumps({
                     "is_complete": True,
                     "source_transcript": str(transcript),
                     "source_fingerprint": sha256_file(transcript),
                     "context_fingerprint": sha256_file(paths.context_json),
+                    "config_signature": translation_signature,
                     "model": "gemini-test",
                     "batch_size": 30,
                     "completed_segments": 1,
