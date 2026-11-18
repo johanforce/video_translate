@@ -27,6 +27,7 @@ class ProjectManager:
         self.project_file = self.paths.transcript_json.parent / (
             self.paths.transcript_json.name.removesuffix(".transcript.json") + ".project.json"
         )
+        self._fingerprint_cache: dict[tuple[str, int, int], str] = {}
         self.state = self._load()
         self.refresh()
 
@@ -184,7 +185,7 @@ class ProjectManager:
                 return False
             return (
                 state.get("is_complete") is True
-                and state.get("source_fingerprint") == sha256_file(source_video)
+                and state.get("source_fingerprint") == self._sha256(source_video)
                 and state.get("config_signature") == value.get("transcription_signature")
             )
         except (ValueError, OSError):
@@ -214,7 +215,7 @@ class ProjectManager:
             value = read_json(self.paths.context_json)
             return (
                 value.get("is_complete") is True
-                and value.get("transcript_fingerprint") == sha256_file(self.paths.transcript_json)
+                and value.get("transcript_fingerprint") == self._sha256(self.paths.transcript_json)
             )
         except (ValueError, OSError):
             return False
@@ -239,11 +240,11 @@ class ProjectManager:
                 value.get("is_complete") is True
                 and isinstance(value.get("segments"), list)
                 and bool(value["segments"])
-                and value.get("source_fingerprint") == sha256_file(self.paths.transcript_json)
+                and value.get("source_fingerprint") == self._sha256(self.paths.transcript_json)
             ):
                 return False
             context = read_json(self.paths.context_json)
-            return value.get("context_fingerprint") == sha256_file(self.paths.context_json) and context.get("is_complete") is True
+            return value.get("context_fingerprint") == self._sha256(self.paths.context_json) and context.get("is_complete") is True
         except (ValueError, OSError):
             return False
 
@@ -303,25 +304,25 @@ class ProjectManager:
             return False
         try:
             info = read_json(metadata)
-            if info.get("output_signature") != sha256_file(output):
+            if info.get("output_signature") != self._sha256(output):
                 return False
             if not self.paths.translated_json.is_file() or not self.paths.tts_manifest.is_file():
                 return False
-            if info.get("translation_fingerprint") != sha256_file(self.paths.translated_json):
+            if info.get("translation_fingerprint") != self._sha256(self.paths.translated_json):
                 return False
             transcript = read_json(self.paths.transcript_json)
             source_video = Path(str(transcript.get("source_video", "")))
             if not source_video.is_file():
                 return False
-            if info.get("source_video_fingerprint") != sha256_file(source_video):
+            if info.get("source_video_fingerprint") != self._sha256(source_video):
                 return False
-            if info.get("tts_manifest_fingerprint") != sha256_file(self.paths.tts_manifest):
+            if info.get("tts_manifest_fingerprint") != self._sha256(self.paths.tts_manifest):
                 return False
             subtitle_mode = str(info.get("subtitle_mode", "none"))
             if subtitle_mode != "none":
                 if not self.paths.translated_srt.is_file():
                     return False
-                if info.get("subtitle_fingerprint") != sha256_file(self.paths.translated_srt):
+                if info.get("subtitle_fingerprint") != self._sha256(self.paths.translated_srt):
                     return False
             return True
         except (ValueError, OSError):
@@ -383,6 +384,18 @@ class ProjectManager:
     def _validate_stage(self, stage: str) -> None:
         if stage not in self.STAGES:
             raise ValueError(f"Stage không hợp lệ: {stage}")
+
+    def _sha256(self, path: Path) -> str:
+        """Memoize large-file hashes while size and mtime remain unchanged."""
+        source = Path(path).expanduser()
+        stat = source.stat()
+        key = (str(source.resolve()), stat.st_size, stat.st_mtime_ns)
+        cached = self._fingerprint_cache.get(key)
+        if cached is not None:
+            return cached
+        fingerprint = sha256_file(source)
+        self._fingerprint_cache[key] = fingerprint
+        return fingerprint
 
     @staticmethod
     def _now() -> str:
