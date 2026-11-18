@@ -8,6 +8,7 @@ from typing import Any, Callable
 from video_translator.core.errors import VideoTranslatorError
 from video_translator.core.models import TranscriptionProgress
 from video_translator.gemini.client import GeminiJsonClient
+from video_translator.gemini.context_compactor import compact_context_profile
 from video_translator.gemini.json_utils import read_json, sha256_file, sha256_text, write_json_atomic
 from video_translator.gemini.project_paths import MovieProjectPaths
 from video_translator.gemini.prompt_loader import load_prompt, render_prompt
@@ -70,6 +71,7 @@ class FilmTranslationService:
             raise FilmTranslationError(
                 "Context Profile chưa phân tích toàn bộ transcript; hãy hoàn tất bước phân tích phim trước."
             )
+        translation_context = compact_context_profile(context)
         source_segments = transcript.get("segments")
         if not isinstance(source_segments, list) or not source_segments:
             raise FilmTranslationError("Transcript không có segments để dịch.")
@@ -128,7 +130,7 @@ class FilmTranslationService:
             prompt = render_prompt(
                 translation_template,
                 {
-                    "CONTEXT_PROFILE_JSON": json.dumps(context, ensure_ascii=False),
+                    "CONTEXT_PROFILE_JSON": json.dumps(translation_context, ensure_ascii=False),
                     "PREVIOUS_CONTEXT_JSON": json.dumps(previous_context, ensure_ascii=False),
                     "NEXT_CONTEXT_JSON": json.dumps(next_context, ensure_ascii=False),
                     "SEGMENTS_JSON": json.dumps(current_prompt_segments, ensure_ascii=False),
@@ -160,11 +162,13 @@ class FilmTranslationService:
                     prompt,
                     system_prompt,
                     cancel_event=cancel_event,
+                    max_output_tokens=max(2048, min(8192, batch_size * 64)),
                 )
                 translated_batch = self._validate_segments(
                     current,
                     translated_response.get("segments"),
                     "dịch",
+                    translated_response.get("performance"),
                 )
                 # Persist immediately after Gemini returns, before the QC request.
                 pending["translation"] = translated_batch
@@ -186,10 +190,10 @@ class FilmTranslationService:
                 qc_prompt = render_prompt(
                     quality_template,
                     {
-                        "CONTEXT_PROFILE_JSON": json.dumps(context, ensure_ascii=False),
+                        "CONTEXT_PROFILE_JSON": json.dumps(translation_context, ensure_ascii=False),
                         "SEGMENTS_JSON": json.dumps(current_prompt_segments, ensure_ascii=False),
                         "TRANSLATION_JSON": json.dumps(
-                            {"segments": translated_batch},
+                            self._prompt_translation_payload(translated_batch),
                             ensure_ascii=False,
                         ),
                     },
@@ -199,16 +203,13 @@ class FilmTranslationService:
                     qc_prompt,
                     system_prompt,
                     cancel_event=cancel_event,
+                    max_output_tokens=max(1024, min(4096, batch_size * 24)),
                 )
-                checked_batch = self._validate_segments(
+                checked_batch, issues = self._apply_qc_response(
                     current,
-                    qc_response.get("segments"),
-                    "kiểm soát chất lượng",
+                    translated_batch,
+                    qc_response,
                 )
-                issues = qc_response.get("issues", [])
-                if not isinstance(issues, list):
-                    issues = []
-                issues = [issue for issue in issues if isinstance(issue, dict)]
                 # Persist the QC result before marking the batch complete.
                 pending["quality_control"] = checked_batch
                 pending["issues"] = issues
@@ -425,10 +426,169 @@ class FilmTranslationService:
         }
 
     @staticmethod
+    def _prompt_translation_payload(segments: list[dict[str, Any]]) -> dict[str, Any]:
+        """Send QC only the translated dialogue and non-default performance labels."""
+        payload: dict[str, Any] = {
+            "segments": [
+                [int(item["id"]), str(item.get("translated_text", ""))]
+                for item in segments
+            ]
+        }
+        performance = [
+            [
+                int(item["id"]),
+                str(item.get("emotion", "neutral")),
+                str(item.get("delivery", "normal")),
+            ]
+            for item in segments
+            if item.get("emotion", "neutral") != "neutral"
+            or item.get("delivery", "normal") != "normal"
+        ]
+        if performance:
+            payload["performance"] = performance
+        return payload
+
+    @classmethod
+    def _apply_qc_response(
+        cls,
+        source: list[dict[str, Any]],
+        translated: list[dict[str, Any]],
+        response: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Apply sparse QC corrections without asking Gemini to echo unchanged lines."""
+        # Backward compatibility for old projects/test clients that return all segments.
+        if isinstance(response.get("segments"), list):
+            checked = cls._validate_segments(
+                source,
+                response["segments"],
+                "kiểm soát chất lượng",
+                response.get("performance"),
+            )
+            raw_issues = response.get("issues", [])
+            return checked, [
+                item for item in raw_issues if isinstance(item, dict)
+            ] if isinstance(raw_issues, list) else []
+
+        source_ids = {int(item["id"]) for item in source}
+        checked_by_id = {
+            int(item["id"]): dict(item)
+            for item in translated
+        }
+        corrections = response.get("corrections", [])
+        if not isinstance(corrections, list):
+            raise FilmTranslationError("QC trả corrections không hợp lệ.")
+
+        seen_corrections: set[int] = set()
+        for item in corrections:
+            if isinstance(item, (list, tuple)) and len(item) == 2:
+                correction = {"id": item[0], "translated_text": item[1]}
+            elif isinstance(item, dict):
+                correction = item
+            else:
+                raise FilmTranslationError("QC trả correction không hợp lệ.")
+            try:
+                segment_id = int(correction["id"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise FilmTranslationError("QC correction thiếu ID hợp lệ.") from exc
+            if segment_id not in source_ids:
+                raise FilmTranslationError(f"QC trả ID không tồn tại {segment_id}.")
+            if segment_id in seen_corrections:
+                raise FilmTranslationError(f"QC trả lặp correction ID {segment_id}.")
+            seen_corrections.add(segment_id)
+            target = checked_by_id[segment_id]
+            if "translated_text" in correction:
+                if not isinstance(correction["translated_text"], str):
+                    raise FilmTranslationError(
+                        f"QC correction segment {segment_id} có translated_text không hợp lệ."
+                    )
+                target["translated_text"] = correction["translated_text"].strip()
+            if isinstance(correction.get("emotion"), str):
+                target["emotion"] = (
+                    correction["emotion"]
+                    if correction["emotion"] in _ALLOWED_EMOTIONS
+                    else "neutral"
+                )
+            if isinstance(correction.get("delivery"), str):
+                target["delivery"] = (
+                    correction["delivery"]
+                    if correction["delivery"] in _ALLOWED_DELIVERIES
+                    else "normal"
+                )
+
+        performance = response.get("performance", [])
+        if not isinstance(performance, list):
+            raise FilmTranslationError("QC trả performance không hợp lệ.")
+        seen_performance: set[int] = set()
+        for item in performance:
+            if isinstance(item, (list, tuple)) and len(item) == 3:
+                raw_id, emotion, delivery = item
+            elif isinstance(item, dict):
+                raw_id = item.get("id")
+                emotion = item.get("emotion")
+                delivery = item.get("delivery")
+            else:
+                raise FilmTranslationError("QC performance row không hợp lệ.")
+            try:
+                segment_id = int(raw_id)
+            except (TypeError, ValueError) as exc:
+                raise FilmTranslationError("QC performance thiếu ID hợp lệ.") from exc
+            if segment_id not in source_ids:
+                raise FilmTranslationError(f"QC performance có ID không tồn tại {segment_id}.")
+            if segment_id in seen_performance:
+                raise FilmTranslationError(f"QC lặp performance ID {segment_id}.")
+            seen_performance.add(segment_id)
+            if isinstance(emotion, str):
+                checked_by_id[segment_id]["emotion"] = (
+                    emotion if emotion in _ALLOWED_EMOTIONS else "neutral"
+                )
+            if isinstance(delivery, str):
+                checked_by_id[segment_id]["delivery"] = (
+                    delivery if delivery in _ALLOWED_DELIVERIES else "normal"
+                )
+
+        raw_issues = response.get("issues", [])
+        if not isinstance(raw_issues, list):
+            raise FilmTranslationError("QC trả issues không hợp lệ.")
+        issues: list[dict[str, Any]] = []
+        for item in raw_issues:
+            if isinstance(item, (list, tuple)) and len(item) >= 3:
+                raw_id, severity, category = item[:3]
+                issue = {"segment_id": raw_id, "severity": severity, "category": category}
+            elif isinstance(item, dict):
+                issue = item
+            else:
+                raise FilmTranslationError("QC issue row không hợp lệ.")
+            try:
+                segment_id = int(issue.get("segment_id", issue.get("id")))
+            except (TypeError, ValueError):
+                continue
+            if segment_id not in source_ids:
+                continue
+            severity = str(issue.get("severity", "high")).lower()
+            category = str(issue.get("category", "uncertainty")).lower()
+            if severity not in {"critical", "high"}:
+                continue
+            if category not in {
+                "accuracy", "omission", "addition", "terminology",
+                "character_consistency", "addressing", "naturalness",
+                "dubbing_fluency", "emotion", "delivery", "uncertainty",
+            }:
+                category = "uncertainty"
+            issues.append({
+                "segment_id": segment_id,
+                "severity": severity,
+                "category": category,
+            })
+
+        checked = [checked_by_id[int(item["id"])] for item in source]
+        return checked, issues
+
+    @staticmethod
     def _validate_segments(
         source: list[dict[str, Any]],
         response_segments: Any,
         operation: str,
+        performance: Any = None,
     ) -> list[dict[str, Any]]:
         if not isinstance(response_segments, list):
             raise FilmTranslationError(f"Gemini không trả danh sách đoạn khi {operation}.")
@@ -454,11 +614,18 @@ class FilmTranslationService:
                 )
             source_by_id[source_id] = original
 
-        # Match returned dialogue by ID, not by array position. Gemini may reorder
-        # objects or alter/omit echoed timing values; neither is authoritative.
+        # Compact rows [id, translated_text] are preferred; object responses
+        # remain accepted for compatibility with existing checkpoint data.
         candidates_by_id: dict[int, dict[str, Any]] = {}
-        for candidate in response_segments:
-            if not isinstance(candidate, dict):
+        for raw_candidate in response_segments:
+            if isinstance(raw_candidate, (list, tuple)) and len(raw_candidate) == 2:
+                candidate = {
+                    "id": raw_candidate[0],
+                    "translated_text": raw_candidate[1],
+                }
+            elif isinstance(raw_candidate, dict):
+                candidate = raw_candidate
+            else:
                 raise FilmTranslationError(
                     f"Segment trả về không hợp lệ khi {operation}."
                 )
@@ -479,6 +646,27 @@ class FilmTranslationService:
                 )
             candidates_by_id[returned_id] = candidate
 
+        performance_by_id: dict[int, tuple[Any, Any]] = {}
+        if performance is not None:
+            if not isinstance(performance, list):
+                raise FilmTranslationError(f"Performance không hợp lệ khi {operation}.")
+            for item in performance:
+                if not isinstance(item, (list, tuple)) or len(item) != 3:
+                    raise FilmTranslationError(f"Performance row không hợp lệ khi {operation}.")
+                try:
+                    performance_id = int(item[0])
+                except (TypeError, ValueError) as exc:
+                    raise FilmTranslationError(f"Performance thiếu ID khi {operation}.") from exc
+                if performance_id not in source_by_id:
+                    raise FilmTranslationError(
+                        f"Performance có ID không tồn tại {performance_id} khi {operation}."
+                    )
+                if performance_id in performance_by_id:
+                    raise FilmTranslationError(
+                        f"Performance lặp ID {performance_id} khi {operation}."
+                    )
+                performance_by_id[performance_id] = (item[1], item[2])
+
         missing_ids = set(source_by_id) - set(candidates_by_id)
         if missing_ids:
             missing_text = ", ".join(str(item) for item in sorted(missing_ids))
@@ -497,8 +685,9 @@ class FilmTranslationService:
                 )
             # An empty translation is treated as an intentionally skipped subtitle.
             # Keep the segment ID/timing in JSON; the SRT writer omits empty cues.
-            emotion = candidate.get("emotion")
-            delivery = candidate.get("delivery")
+            performance_values = performance_by_id.get(source_id, (None, None))
+            emotion = candidate.get("emotion") or performance_values[0]
+            delivery = candidate.get("delivery") or performance_values[1]
             result.append(
                 {
                     "id": source_id,
