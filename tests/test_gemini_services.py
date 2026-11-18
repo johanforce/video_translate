@@ -7,6 +7,7 @@ from unittest.mock import patch
 from video_translator.gemini.film_translation_service import FilmTranslationError, FilmTranslationService
 from video_translator.gemini.movie_context_service import MovieContextService
 from video_translator.gemini.project_paths import MovieProjectPaths
+from video_translator.gemini.json_utils import write_json_atomic
 
 
 class FakeContextClient:
@@ -172,6 +173,55 @@ class GeminiServiceTests(unittest.TestCase):
 
                 service.run(transcript_path, batch_segments=40)
                 self.assertEqual(fake_client.calls, first_call_count)
+
+    def test_context_finalize_response_is_cached_after_crash(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            transcript_path = self._write_transcript(root)
+            fake_client = FakeContextClient("test", "test-model")
+            real_write = write_json_atomic
+            writes = {"count": 0}
+
+            def write_then_simulate_crash(path, payload):
+                writes["count"] += 1
+                real_write(path, payload)
+                if writes["count"] == 2:
+                    raise RuntimeError("simulated power loss after final response checkpoint")
+
+            with (
+                patch(
+                    "video_translator.gemini.movie_context_service.GeminiJsonClient",
+                    return_value=fake_client,
+                ),
+                patch(
+                    "video_translator.gemini.movie_context_service.write_json_atomic",
+                    side_effect=write_then_simulate_crash,
+                ),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "simulated power loss"):
+                    MovieContextService("test", "test-model").run(
+                        transcript_path,
+                        batch_segments=40,
+                    )
+
+            context_path = MovieProjectPaths.from_transcript(transcript_path).context_json
+            checkpoint = json.loads(context_path.read_text(encoding="utf-8"))
+            self.assertIn("finalize_response", checkpoint)
+            calls_after_crash = fake_client.calls
+            self.assertEqual(calls_after_crash, 2)
+
+            with patch(
+                "video_translator.gemini.movie_context_service.GeminiJsonClient",
+                return_value=fake_client,
+            ):
+                MovieContextService("test", "test-model").run(
+                    transcript_path,
+                    batch_segments=40,
+                )
+
+            self.assertEqual(fake_client.calls, calls_after_crash)
+            completed = json.loads(context_path.read_text(encoding="utf-8"))
+            self.assertTrue(completed["is_complete"])
 
     def test_translation_preserves_ids_and_source_timestamps(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
