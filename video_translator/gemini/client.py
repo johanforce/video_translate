@@ -45,13 +45,14 @@ class GeminiJsonClient:
         cancel_event: threading.Event | None = None,
         max_attempts: int = 4,
         debug_path: Path | None = None,
+        max_output_tokens: int = 8192,
     ) -> dict[str, Any]:
         cancel_event = cancel_event or threading.Event()
         config = self._types.GenerateContentConfig(
             system_instruction=system_instruction,
             response_mime_type="application/json",
             temperature=0.2,
-            max_output_tokens=8192,
+            max_output_tokens=max(1024, min(int(max_output_tokens), 8192)),
         )
         last_error: Exception | None = None
         for attempt in range(1, max_attempts + 1):
@@ -115,7 +116,7 @@ class GeminiJsonClient:
                         system_instruction=repair_system,
                         response_mime_type="application/json",
                         temperature=0.0,
-                        max_output_tokens=8192,
+                        max_output_tokens=max(1024, min(int(max_output_tokens), 8192)),
                     )
                     try:
                         repaired_response = self._client.models.generate_content(
