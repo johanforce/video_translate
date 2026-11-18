@@ -19,8 +19,9 @@ Python desktop application for contextual Vietnamese film translation and dubbin
 
 ### v0.3 — Movie Context
 - Gemini analyzes the transcript chapter by chapter (default 120 segments when translation batches are 30).
-- Builds a persistent profile of the story, characters, relationships, Vietnamese forms of address, terminology, continuity facts and uncertainties.
-- Saves the profile after each accepted chapter/subchapter.
+- Builds a compact profile of recurring characters, relationships, Vietnamese forms of address, terminology and continuity facts.
+- Sends compact prior context without evidence IDs/confidence metadata; saves after every accepted chapter/subchapter.
+- Final profile de-duplication is local, so there is no extra Gemini call to echo the accumulated profile.
 - If Gemini reaches `MAX_TOKENS`, the application automatically bisects that chapter and retries smaller ranges; each accepted subchapter is checkpointed before continuing.
 - Context output is incremental: the prompt asks Gemini to report only new or materially updated facts, not repeat the entire accumulated profile.
 - Changing Gemini model or reducing chapter size keeps the already-processed segment count/profile. Only the unfinished tail is sent again.
@@ -29,7 +30,9 @@ Python desktop application for contextual Vietnamese film translation and dubbin
 ### v0.4 — Film Translation
 - Translates batches using the film profile and neighboring dialogue.
 - Natural spoken Vietnamese, with character voice and performance metadata.
-- Quality control runs separately for every batch.
+- Quality control runs separately for every batch but returns only corrections and material unresolved issues; unchanged dialogue is never echoed.
+- Translation responses use compact [segment ID, text] rows. Default emotion/delivery labels and source speaker/timestamp fields are reconstructed locally.
+- Translation/QC receive a compact context view without segment evidence, confidence scores, or unrelated uncertainty notes. Per-task response-token budgets are capped.
 - Source segment IDs are validated and matched by ID; timestamps are always restored from the original Whisper transcript, so Gemini cannot alter the dubbing timeline.
 - Translation response is checkpointed immediately, before QC. If Gemini fails during QC, restart reuses the translation and retries only QC.
 - Exports Vietnamese JSON, SRT and a quality report.
