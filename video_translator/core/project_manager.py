@@ -163,7 +163,10 @@ class ProjectManager:
             return False
         try:
             value = read_json(self.paths.context_json)
-            return value.get("is_complete") is True
+            return (
+                value.get("is_complete") is True
+                and value.get("transcript_fingerprint") == sha256_file(self.paths.transcript_json)
+            )
         except (ValueError, OSError):
             return False
 
@@ -183,11 +186,15 @@ class ProjectManager:
             return False
         try:
             value = read_json(self.paths.translated_json)
-            return (
+            if not (
                 value.get("is_complete") is True
                 and isinstance(value.get("segments"), list)
                 and bool(value["segments"])
-            )
+                and value.get("source_fingerprint") == sha256_file(self.paths.transcript_json)
+            ):
+                return False
+            context = read_json(self.paths.context_json)
+            return value.get("context_fingerprint") == sha256_file(self.paths.context_json) and context.get("is_complete") is True
         except (ValueError, OSError):
             return False
 
@@ -207,7 +214,14 @@ class ProjectManager:
             return False
         try:
             value = read_json(self.paths.tts_manifest)
-            if value.get("is_complete") is not True:
+            if value.get("is_complete") is not True or not self.paths.translated_json.is_file():
+                return False
+            translation_fingerprint = __import__(
+                "hashlib"
+            ).sha256(
+                self.paths.translated_json.read_text(encoding="utf-8").encode("utf-8")
+            ).hexdigest()
+            if value.get("translation_fingerprint") != translation_fingerprint:
                 return False
             entries = value.get("segments", {})
             if not isinstance(entries, dict):
@@ -242,7 +256,15 @@ class ProjectManager:
             return False
         try:
             info = read_json(metadata)
-            return info.get("output_signature") == sha256_file(output)
+            if info.get("output_signature") != sha256_file(output):
+                return False
+            if not self.paths.translated_json.is_file() or not self.paths.tts_manifest.is_file():
+                return False
+            if info.get("translation_fingerprint") != sha256_file(self.paths.translated_json):
+                return False
+            if info.get("tts_manifest_fingerprint") != sha256_file(self.paths.tts_manifest):
+                return False
+            return True
         except (ValueError, OSError):
             return False
 
