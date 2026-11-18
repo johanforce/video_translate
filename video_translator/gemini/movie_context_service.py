@@ -115,16 +115,28 @@ class MovieContextService:
         system_prompt = load_prompt("system_prompt.txt")
         analysis_template = load_prompt("context_analysis.txt")
         finalize_template = load_prompt("context_finalize.txt")
+        prompt_signature = system_prompt + analysis_template + finalize_template
+        # A Gemini model change must not invalidate completed chapters. The new
+        # model is used only for chapters that have not yet been processed.
         config_signature = sha256_text(
-            fingerprint
-            + self.model
-            + str(batch_size)
-            + system_prompt
-            + analysis_template
-            + finalize_template
+            fingerprint + str(batch_size) + prompt_signature
         )
-        if state.get("config_signature") != config_signature:
-            state = self._new_state(fingerprint)
+        saved_signature = state.get("config_signature")
+        if saved_signature != config_signature:
+            saved_model = str(state.get("model") or "")
+            legacy_signature = sha256_text(
+                fingerprint + saved_model + str(batch_size) + prompt_signature
+            )
+            if saved_model and saved_signature == legacy_signature:
+                self._log(
+                    f"Đổi Gemini model {saved_model} → {self.model}; "
+                    "giữ nguyên chapter đã phân tích và tiếp tục phần còn lại."
+                )
+                state["config_signature"] = config_signature
+                state["model"] = self.model
+                write_json_atomic(paths.context_json, state)
+            else:
+                state = self._new_state(fingerprint)
         state["config_signature"] = config_signature
 
         profile = self._normalize_profile(state.get("profile"))
