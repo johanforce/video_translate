@@ -122,7 +122,7 @@ class FakeRecoverableTranslationClient:
         ]
 
     def generate_json(self, prompt: str, system_instruction: str, cancel_event=None):
-        if "TASK: TRANSLATE A TIMESTAMPED FILM DIALOGUE BATCH" in prompt:
+        if "TASK: TRANSLATE A FILM DIALOGUE BATCH" in prompt:
             self.translation_calls += 1
             return {"segments": self.translated}
         self.qc_calls += 1
