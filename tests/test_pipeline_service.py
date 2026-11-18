@@ -116,6 +116,39 @@ class PipelineStageCacheTests(unittest.TestCase):
                 )
             )
 
+    def test_switching_gemini_model_keeps_completed_context_and_translation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            _, manager = self._prepare_project(Path(temp_dir))
+
+            self.assertTrue(
+                ProjectPipelineService._is_stage_completed(
+                    manager,
+                    "context",
+                    "gemini-3.8-flash",
+                    "small",
+                    None,
+                    "",
+                    1.0,
+                    30,
+                    "both",
+                    "duck",
+                )
+            )
+            self.assertTrue(
+                ProjectPipelineService._is_stage_completed(
+                    manager,
+                    "translation",
+                    "gemini-3.8-flash",
+                    "small",
+                    None,
+                    "",
+                    1.0,
+                    30,
+                    "both",
+                    "duck",
+                )
+            )
+
     def test_changed_batch_configuration_invalidates_only_dependent_stage(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             paths, manager = self._prepare_project(Path(temp_dir))
