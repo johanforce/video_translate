@@ -1000,6 +1000,9 @@ class MainWindow(QMainWindow):
                 label = f"{label} [Clone]"
             self.voice_combo.addItem(label, voice["id"])
         selected_index = self.voice_combo.findData(selected)
+        if selected_index < 0 and selected:
+            self.voice_combo.addItem(f"Saved project voice · {selected}", selected)
+            selected_index = self.voice_combo.findData(selected)
         if selected_index >= 0:
             self.voice_combo.setCurrentIndex(selected_index)
         self._append_log(f"Đã tải {len(voices)} giọng VieNeu v4.")
