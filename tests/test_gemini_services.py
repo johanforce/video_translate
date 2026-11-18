@@ -121,7 +121,7 @@ class FakeRecoverableTranslationClient:
             },
         ]
 
-    def generate_json(self, prompt: str, system_instruction: str, cancel_event=None):
+    def generate_json(self, prompt: str, system_instruction: str, cancel_event=None, max_output_tokens=None):
         if "TASK: TRANSLATE THE CURRENT FILM DIALOGUE BATCH" in prompt:
             self.translation_calls += 1
             return {"segments": self.translated}
@@ -430,7 +430,7 @@ class GeminiServiceTests(unittest.TestCase):
                 self.calls = 0
                 self.analyzed_ranges = []
 
-            def generate_json(self, prompt: str, system_instruction: str, cancel_event=None, debug_path=None):
+            def generate_json(self, prompt: str, system_instruction: str, cancel_event=None, debug_path=None, max_output_tokens=None):
                 self.calls += 1
                 if "TRANSCRIPT CHAPTER:\n" not in prompt:
                     return {}
