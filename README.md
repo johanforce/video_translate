@@ -49,6 +49,12 @@ pip install -r requirements.txt
 python main.py
 \`\`\`
 
+## Run tests
+
+```bash
+python -m unittest discover -s tests -v
+```
+
 ## Download behavior
 
 - The downloader selects the best available video/audio streams with a maximum source height of 1080p.
