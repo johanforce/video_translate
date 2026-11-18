@@ -156,9 +156,8 @@ class VieNeuTTSService:
                 entries[str(segment_id)] = entry
                 write_json_atomic(paths.tts_manifest, manifest)
 
-            if job_id:
-                # The service client can resume polling a previously accepted job.
-                try:
+            try:
+                if job_id:
                     audio_path, metadata = self.client.resume_segment(
                         job_id=job_id,
                         segment_id=segment_id,
@@ -169,25 +168,25 @@ class VieNeuTTSService:
                         cancel_event=cancel_event,
                         log_callback=self.log_callback,
                     )
-                except VieNeuJobFailedError as exc:
-                    entry["status"] = "failed"
-                    entry["last_error"] = str(exc)
-                    write_json_atomic(paths.tts_manifest, manifest)
-                    raise
-            else:
-                audio_path, metadata = self.client.synthesize_segment(
-                    text=text,
-                    voice_id=voice_id,
-                    speed=speed,
-                    segment_id=segment_id,
-                    request_key=request_key,
-                    output_dir=paths.tts_dir,
-                    cancel_event=cancel_event,
-                    log_callback=self.log_callback,
-                    job_callback=lambda job_id, response, sid=segment_id, ent=entry: self._save_job_checkpoint(
-                        paths.tts_manifest, manifest, sid, ent, job_id, response
-                    ),
-                )
+                else:
+                    audio_path, metadata = self.client.synthesize_segment(
+                        text=text,
+                        voice_id=voice_id,
+                        speed=speed,
+                        segment_id=segment_id,
+                        request_key=request_key,
+                        output_dir=paths.tts_dir,
+                        cancel_event=cancel_event,
+                        log_callback=self.log_callback,
+                        job_callback=lambda job_id, response, sid=segment_id, ent=entry: self._save_job_checkpoint(
+                            paths.tts_manifest, manifest, sid, ent, job_id, response
+                        ),
+                    )
+            except VieNeuJobFailedError as exc:
+                entry["status"] = "failed"
+                entry["last_error"] = str(exc)
+                write_json_atomic(paths.tts_manifest, manifest)
+                raise
 
             entries[str(segment_id)] = {
                 **entry,
