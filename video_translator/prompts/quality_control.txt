@@ -43,8 +43,8 @@ CHECK EACH SEGMENT FOR
 - Do not delete meaning solely to fit an estimated duration.
 
 STRICT DATA RULES
-- Keep every segment ID and timestamp exactly unchanged.
-- Return exactly one corrected translation per source segment, in the original order.
+- Keep every segment ID exactly unchanged. Do not return timestamps; the application restores them from the original transcript.
+- Return exactly one corrected translation per source segment, keyed by its original ID.
 - Never merge, split, remove, duplicate, or reorder segments.
 - Do not invent missing dialogue.
 - If the translation is already good, keep it unchanged.
@@ -57,8 +57,6 @@ Return valid JSON only:
   "segments": [
     {
       "id": 0,
-      "start": 0.0,
-      "end": 0.0,
       "speaker_id": null,
       "translated_text": "",
       "emotion": "neutral",
