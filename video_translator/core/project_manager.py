@@ -169,8 +169,24 @@ class ProjectManager:
             return False
         try:
             value = read_json(self.paths.transcript_json)
-            # Legacy v0.2 transcript files did not contain is_complete.
-            return value.get("is_complete") is not False
+            # Legacy v0.2 transcript files did not contain checkpoint metadata.
+            if value.get("is_complete") is False:
+                return False
+            checkpoint_text = str(value.get("checkpoint_path", "")).strip()
+            if not checkpoint_text:
+                return True
+            checkpoint = Path(checkpoint_text)
+            if not checkpoint.is_file():
+                return False
+            state = read_json(checkpoint)
+            source_video = Path(str(value.get("source_video", ""))).expanduser()
+            if not source_video.is_file():
+                return False
+            return (
+                state.get("is_complete") is True
+                and state.get("source_fingerprint") == sha256_file(source_video)
+                and state.get("config_signature") == value.get("transcription_signature")
+            )
         except (ValueError, OSError):
             return False
 
@@ -301,6 +317,12 @@ class ProjectManager:
                 return False
             if info.get("tts_manifest_fingerprint") != sha256_file(self.paths.tts_manifest):
                 return False
+            subtitle_mode = str(info.get("subtitle_mode", "none"))
+            if subtitle_mode != "none":
+                if not self.paths.translated_srt.is_file():
+                    return False
+                if info.get("subtitle_fingerprint") != sha256_file(self.paths.translated_srt):
+                    return False
             return True
         except (ValueError, OSError):
             return False
