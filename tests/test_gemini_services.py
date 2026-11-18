@@ -16,7 +16,7 @@ class FakeContextClient:
     def __init__(self, api_key: str, model: str) -> None:
         self.calls = 0
 
-    def generate_json(self, prompt: str, system_instruction: str, cancel_event=None, debug_path=None):
+    def generate_json(self, prompt: str, system_instruction: str, cancel_event=None, debug_path=None, max_output_tokens=None):
         self.calls += 1
         return {
             "film_profile": {
@@ -59,7 +59,7 @@ class FakeTranslationClient:
     def __init__(self, api_key: str, model: str) -> None:
         self.calls = 0
 
-    def generate_json(self, prompt: str, system_instruction: str, cancel_event=None):
+    def generate_json(self, prompt: str, system_instruction: str, cancel_event=None, max_output_tokens=None):
         self.calls += 1
         translated = [
             {
@@ -122,7 +122,7 @@ class FakeRecoverableTranslationClient:
         ]
 
     def generate_json(self, prompt: str, system_instruction: str, cancel_event=None):
-        if "TASK: TRANSLATE A FILM DIALOGUE BATCH" in prompt:
+        if "TASK: TRANSLATE THE CURRENT FILM DIALOGUE BATCH" in prompt:
             self.translation_calls += 1
             return {"segments": self.translated}
         self.qc_calls += 1
@@ -208,9 +208,10 @@ class GeminiServiceTests(unittest.TestCase):
 
             context_path = MovieProjectPaths.from_transcript(transcript_path).context_json
             checkpoint = json.loads(context_path.read_text(encoding="utf-8"))
-            self.assertIn("finalize_response", checkpoint)
+            self.assertNotIn("finalize_response", checkpoint)
+            self.assertTrue(checkpoint["is_complete"])
             calls_after_crash = fake_client.calls
-            self.assertEqual(calls_after_crash, 2)
+            self.assertEqual(calls_after_crash, 1)
 
             with patch(
                 "video_translator.gemini.movie_context_service.GeminiJsonClient",
@@ -269,8 +270,8 @@ class GeminiServiceTests(unittest.TestCase):
                     batch_segments=40,
                 )
 
-            # The chapter response was read from disk; only the finalizer is called.
-            self.assertEqual(fake_client.calls, 2)
+            # The accepted chapter response is reused; local finalization makes no extra call.
+            self.assertEqual(fake_client.calls, 1)
             completed = json.loads(context_path.read_text(encoding="utf-8"))
             self.assertTrue(completed["is_complete"])
             self.assertEqual(completed["chapter_responses"], {})
@@ -346,8 +347,8 @@ class GeminiServiceTests(unittest.TestCase):
                 )
 
             completed = json.loads(paths.context_json.read_text(encoding="utf-8"))
-            # One remaining chapter plus the final profile consolidation.
-            self.assertEqual(fake_client.calls, 2)
+            # Only the unfinished chapter is sent; profile finalization is local.
+            self.assertEqual(fake_client.calls, 1)
             self.assertTrue(completed["is_complete"])
             self.assertEqual(completed["processed_segments"], 80)
             self.assertEqual(
@@ -431,10 +432,10 @@ class GeminiServiceTests(unittest.TestCase):
 
             def generate_json(self, prompt: str, system_instruction: str, cancel_event=None, debug_path=None):
                 self.calls += 1
-                if "INPUT TRANSCRIPT:\n" not in prompt:
+                if "TRANSCRIPT CHAPTER:\n" not in prompt:
                     return {}
                 raw = prompt.split("INPUT TRANSCRIPT:\n", 1)[1].split(
-                    "\n\nEXISTING PROJECT CONTEXT", 1
+                    "\n\nKNOWN PROFILE", 1
                 )[0]
                 payload = json.loads(raw)
                 if len(payload["segments"]) > 4:
@@ -488,7 +489,7 @@ class GeminiServiceTests(unittest.TestCase):
             state = json.loads(context_path.read_text(encoding="utf-8"))
             self.assertTrue(state["is_complete"])
             self.assertEqual(state["processed_segments"], 8)
-            self.assertEqual(fake_client.calls, 4)
+            self.assertEqual(fake_client.calls, 3)
             self.assertEqual(fake_client.analyzed_ranges, [[1, 4], [5, 8]])
             self.assertTrue(any("[MAX_TOKENS]" in line for line in logs))
 
@@ -595,7 +596,7 @@ class GeminiServiceTests(unittest.TestCase):
                 fake_client.analyzed_ranges,
                 [[361, 480], [481, 527]],
             )
-            self.assertEqual(fake_client.calls, 3)
+            self.assertEqual(fake_client.calls, 2)
             self.assertTrue(completed["is_complete"])
             self.assertEqual(completed["processed_segments"], 527)
             self.assertIn(
@@ -748,6 +749,47 @@ class GeminiServiceTests(unittest.TestCase):
             self.assertTrue(completed["is_complete"])
             self.assertEqual(completed["pending_batches"], {})
 
+
+    def test_compact_translation_rows_restore_defaults_and_sparse_performance(self) -> None:
+        source = [
+            {"id": 51, "start": 1.0, "end": 2.0, "text": "Hello"},
+            {"id": 52, "start": 2.0, "end": 3.0, "text": "Goodbye"},
+        ]
+        validated = FilmTranslationService._validate_segments(
+            source,
+            [[51, "Xin chào"], [52, "Tạm biệt"]],
+            "test",
+            [[52, "sad", "soft"]],
+        )
+        self.assertEqual([item["translated_text"] for item in validated], ["Xin chào", "Tạm biệt"])
+        self.assertEqual(
+            [(item["emotion"], item["delivery"]) for item in validated],
+            [("neutral", "normal"), ("sad", "soft")],
+        )
+        self.assertNotIn("speaker_id", validated[0])
+
+    def test_sparse_qc_only_changes_corrected_segments(self) -> None:
+        source = [
+            {"id": 51, "start": 1.0, "end": 2.0, "text": "Hello"},
+            {"id": 52, "start": 2.0, "end": 3.0, "text": "Goodbye"},
+        ]
+        translated = [
+            {"id": 51, "start": 1.0, "end": 2.0, "translated_text": "Xin chào", "emotion": "neutral", "delivery": "normal"},
+            {"id": 52, "start": 2.0, "end": 3.0, "translated_text": "Tạm biệt", "emotion": "neutral", "delivery": "normal"},
+        ]
+        checked, issues = FilmTranslationService._apply_qc_response(
+            source,
+            translated,
+            {
+                "corrections": [[52, "Chào tạm biệt!"]],
+                "performance": [[52, "sad", "soft"]],
+                "issues": [[52, "high", "accuracy"]],
+            },
+        )
+        self.assertEqual(checked[0]["translated_text"], "Xin chào")
+        self.assertEqual(checked[1]["translated_text"], "Chào tạm biệt!")
+        self.assertEqual((checked[1]["emotion"], checked[1]["delivery"]), ("sad", "soft"))
+        self.assertEqual(issues, [{"segment_id": 52, "severity": "high", "category": "accuracy"}])
 
     def test_translation_restores_source_timestamps_when_gemini_changes_them(self) -> None:
         source = [{"id": 51, "start": 12.345, "end": 13.678, "text": "Hello"}]
