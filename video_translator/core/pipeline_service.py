@@ -393,19 +393,25 @@ class ProjectPipelineService:
                     + str(batch_size)
                     + prompt_signature
                 )
-                legacy_signature = sha256_text(
-                    transcript_fingerprint
-                    + context_fingerprint
-                    + str(translated.get("model") or "")
-                    + str(batch_size)
-                    + prompt_signature
-                )
+                legacy_signatures = {
+                    sha256_text(
+                        transcript_fingerprint
+                        + context_fingerprint
+                        + str(batch_size)
+                        + prompt_signature
+                    ),
+                    sha256_text(
+                        transcript_fingerprint
+                        + context_fingerprint
+                        + str(translated.get("model") or "")
+                        + str(batch_size)
+                        + prompt_signature
+                    ),
+                }
                 return (
                     int(translated.get("batch_size", 0)) == batch_size
-                    and translated.get("config_signature") in {
-                        expected_signature,
-                        legacy_signature,
-                    }
+                    and translated.get("config_signature")
+                    in ({expected_signature} | legacy_signatures)
                 )
             if stage == "tts":
                 manifest = read_json(manager.paths.tts_manifest)
