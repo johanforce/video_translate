@@ -59,7 +59,6 @@ class ProjectPipelineService:
         gemini_api_key: str = "",
         gemini_model: str = "gemini-3.8-flash",
         translation_batch_size: int = 30,
-        vieneu_api_key: str = "",
         voice_id: str = "",
         voice_speed: float = 1.0,
         subtitle_mode: str = "both",
@@ -254,9 +253,7 @@ class ProjectPipelineService:
             batch_size=int(translation_batch_size),
         )
 
-        # Restore the last VieNeu configuration from its manifest if the app was
-        # reopened before the voice catalogue was loaded. This lets an interrupted
-        # TTS project poll the saved jobs instead of requiring the user to guess voice.
+        # Restore the last local VieNeu SDK voice configuration when reopening a project.
         if paths.tts_manifest.is_file():
             try:
                 saved_tts = read_json(paths.tts_manifest)
@@ -270,11 +267,10 @@ class ProjectPipelineService:
             except (OSError, ValueError, TypeError):
                 pass
 
-        # 4. Per-line VieNeu synthesis. The manifest contains request keys and job IDs.
+        # 4. Per-line local VieNeu SDK synthesis. Completed WAV files are reused from cache.
         run_stage(
             "tts",
             lambda: VieNeuTTSService(
-                api_key=vieneu_api_key,
                 progress_callback=stage_progress("tts", 75, 17),
                 log_callback=self.log_callback,
             ).run(
