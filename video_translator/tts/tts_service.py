@@ -40,10 +40,10 @@ class VieNeuTTSService:
         cancel_event: threading.Event | None = None,
     ) -> tuple[Path, int, int]:
         cancel_event = cancel_event or threading.Event()
-        paths = MovieProjectPaths.from_transcript(
-            Path(read_json(translated_json).get("source_transcript") or translated_json)
-        )
         payload = read_json(translated_json)
+        paths = MovieProjectPaths.from_transcript(
+            Path(payload.get("source_transcript") or translated_json)
+        )
         segments = payload.get("segments")
         if not isinstance(segments, list) or not segments:
             raise TTSServiceError("File bản dịch không có segments.")
@@ -61,9 +61,16 @@ class VieNeuTTSService:
                 tts_manifest=base / f"{Path(translated_json).stem}.tts" / "manifest.json",
             )
 
-        voice_id = (voice_id or "").strip()
-        if not voice_id:
-            raise TTSServiceError("Hãy chọn một giọng VieNeu SDK.")
+        requested_voice = (voice_id or "").strip()
+        try:
+            voice_id = self.client.resolve_voice_id(requested_voice)
+        except Exception as exc:
+            raise TTSServiceError(str(exc)) from exc
+        if requested_voice != voice_id:
+            self._log(
+                f"Giọng '{requested_voice or 'chưa chọn'}' không có trong SDK local; "
+                f"chuyển sang preset '{voice_id}'."
+            )
         speed = max(0.5, min(3.0, float(speed)))
         translation_text = Path(translated_json).read_text(encoding="utf-8")
         translation_fingerprint = sha256_text(translation_text)
