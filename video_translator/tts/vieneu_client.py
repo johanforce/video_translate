@@ -29,8 +29,10 @@ class VieNeuClient:
     def list_voices() -> list[dict[str, Any]]:
         """Read the SDK's bundled voice catalogue without initializing/downloading a model."""
         try:
-            resource = importlib.resources.files("vieneu").joinpath(
-                "assets/voices_v3_turbo.json"
+            resource = (
+                importlib.resources.files("vieneu")
+                .joinpath("assets")
+                .joinpath("voices_v3_turbo.json")
             )
             with resource.open("r", encoding="utf-8") as stream:
                 payload = json.load(stream)
