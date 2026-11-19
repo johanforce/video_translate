@@ -38,6 +38,21 @@ class VieNeuClientTests(unittest.TestCase):
         self.assertEqual(voices[0]["engine"], LOCAL_ENGINE)
         self.assertEqual(voices[0]["kind"], "preset")
 
+    def test_legacy_cloud_voice_resolves_to_local_preset(self) -> None:
+        voices = [
+            {"id": "Hải Đăng"},
+            {"id": "Trúc Ly"},
+        ]
+        with patch.object(VieNeuClient, "list_voices", return_value=voices):
+            self.assertEqual(
+                VieNeuClient.resolve_voice_id("Ngọc Lan", "Hải Đăng"),
+                "Hải Đăng",
+            )
+            self.assertEqual(
+                VieNeuClient.resolve_voice_id("Trúc Ly", "Hải Đăng"),
+                "Trúc Ly",
+            )
+
     def test_missing_sdk_shows_install_command(self) -> None:
         with patch(
             "video_translator.tts.vieneu_client.importlib.resources.files",
