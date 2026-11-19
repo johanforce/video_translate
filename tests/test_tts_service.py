@@ -17,6 +17,10 @@ class FakeVieNeuClient:
     def close(self) -> None:
         pass
 
+    @staticmethod
+    def resolve_voice_id(requested_voice="", fallback_voice="Hải Đăng") -> str:
+        return requested_voice or fallback_voice
+
     def synthesize_segment(
         self,
         text,
