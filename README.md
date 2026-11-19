@@ -121,9 +121,9 @@ All durable project data is stored beside the output project:
 - `<movie>.vi.dubbed.mp4` / `.render.json` — final render and artifact fingerprints.
 - `<movie>.project.json` — project stages and history.
 
-If Gemini returns a valid translation and then the QC call fails, the translation response is checkpointed before QC; the next run retries QC only. Context chapter responses and the final context response are also saved before profile consolidation. If the application closes between Whisper chunks, completed chunks are skipped. VieNeu audio is generated locally. Completed segment WAV files are committed to the manifest and reused after restart; a crash during one segment only requires regenerating that local segment. If the application closes during MP4 rendering, the incomplete output is discarded and rendering is repeated from cached narration/TTS/prepared clips—not from Gemini or VieNeu.
+If Gemini returns a valid translation and then the QC call fails, the translation response is checkpointed before QC; the next run retries QC only. Context chapter responses are saved before local profile consolidation; there is no extra Gemini finalization call. If the application closes between Whisper chunks, completed chunks are skipped. VieNeu audio is generated locally. Completed segment WAV files are committed to the manifest and reused after restart; a crash during one segment only requires regenerating that local segment. If the application closes during MP4 rendering, the incomplete output is discarded and rendering is repeated from cached narration/TTS/prepared clips—not from Gemini or VieNeu.
 
-Do not delete `.video_translator_cache`, `.tts` or project JSON files if you want to resume from previous work. Gemini API keys are read from `.env` or can be entered in the app; VieNeu does not use an API key.
+Do not delete `.video_translator_cache`, `.tts` or project JSON files if you want to resume from previous work. Only the Gemini API key is read from `.env` or entered in the app; VieNeu does not use an API key.
 
 ## Output and synchronization notes
 
