@@ -35,6 +35,7 @@ class VideoRenderer:
 
     SUBTITLE_MODES = {"hard", "soft", "both", "none"}
     AUDIO_MODES = {"duck", "mix", "mute"}
+    SUBTITLE_STYLE_ID = "white-text-solid-black-box-v1"
 
     def __init__(
         self,
@@ -111,6 +112,7 @@ class VideoRenderer:
                     subtitle_mode,
                     original_audio_mode,
                     "h264-crf18-aac192k",
+                    self.SUBTITLE_STYLE_ID,
                 )
             )
         )
@@ -252,6 +254,7 @@ class VideoRenderer:
             "output": str(output),
             "duration_seconds": rendered_duration,
             "subtitle_mode": subtitle_mode,
+            "subtitle_style": self.SUBTITLE_STYLE_ID,
             "original_audio_mode": original_audio_mode,
             "video_codec": "h264" if subtitle_mode in {"hard", "both"} else "copied",
             "audio_codec": "aac",
@@ -269,8 +272,9 @@ class VideoRenderer:
         for character in (":", "'", ",", "[", "]"):
             escaped = escaped.replace(character, "\\" + character)
         style = (
-            "FontName=Arial,FontSize=20,Outline=2,Shadow=1,"
-            "MarginV=28,Alignment=2,BorderStyle=1"
+            "FontName=Arial,FontSize=20,PrimaryColour=&H00FFFFFF,"
+            "Outline=5,Shadow=0,MarginV=28,Alignment=2,"
+            "BorderStyle=3,BackColour=&H00000000"
         )
         return f"subtitles=filename='{escaped}':force_style='{style}'"
 
