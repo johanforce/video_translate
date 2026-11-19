@@ -46,7 +46,7 @@ class PipelineWorker(QThread):
             "gemini_api_key": gemini_api_key,
             "gemini_model": gemini_model,
             "translation_batch_size": translation_batch_size,
-             "voice_id": voice_id,
+            "voice_id": voice_id,
             "voice_speed": voice_speed,
             "subtitle_mode": subtitle_mode,
             "original_audio_mode": original_audio_mode,
