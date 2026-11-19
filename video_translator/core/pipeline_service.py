@@ -276,9 +276,9 @@ class ProjectPipelineService:
             )
         except Exception as exc:
             raise RuntimeError(f"Không tải được preset voice từ VieNeu SDK: {exc}") from exc
-        if requested_voice != voice_id:
+        if requested_voice_id != voice_id:
             self._log(
-                f"Giọng lưu từ Cloud v4 '{requested_voice or 'trống'}' không có trong SDK local; "
+                f"Giọng lưu từ Cloud v4 '{requested_voice_id or 'trống'}' không có trong SDK local; "
                 f"chuyển sang preset '{voice_id}'."
             )
 
