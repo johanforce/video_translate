@@ -11,8 +11,11 @@ from video_translator.tts.tts_service import VieNeuTTSService
 class FakeVieNeuClient:
     calls = 0
 
-    def __init__(self, api_key: str) -> None:
-        self.api_key = api_key
+    def __init__(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
 
     def synthesize_segment(
         self,
@@ -24,17 +27,14 @@ class FakeVieNeuClient:
         output_dir,
         cancel_event,
         log_callback=None,
-        job_callback=None,
     ):
         type(self).calls += 1
         output_dir.mkdir(parents=True, exist_ok=True)
         audio_path = output_dir / f"segment_{segment_id:06d}.wav"
         audio_path.write_bytes(b"RIFF" + b"x" * 200)
-        if job_callback:
-            job_callback(f"job-{segment_id}", {"status": "queued"})
         return audio_path, {
-            "job_id": f"job-{segment_id}",
             "status": "completed",
+            "engine": "v3turbo",
             "audio_path": str(audio_path),
             "duration_seconds": 1.0,
             "voice_id": voice_id,
@@ -44,9 +44,9 @@ class FakeVieNeuClient:
 
 
 class TTSServiceTests(unittest.TestCase):
-    def test_vieneu_v4_only_gets_supported_inline_laugh_cue(self) -> None:
+    def test_vieneu_v3_maps_laughter_to_sdk_inline_cue(self) -> None:
         self.assertEqual(
-            VieNeuTTSService._apply_v4_cues(
+            VieNeuTTSService._apply_v3_cues(
                 "Tôi không tin nổi!",
                 {"delivery": "laughing", "emotion": "humorous"},
             ),
@@ -105,7 +105,7 @@ class TTSServiceTests(unittest.TestCase):
                 "video_translator.tts.tts_service.VieNeuClient",
                 FakeVieNeuClient,
             ):
-                service = VieNeuTTSService("test-key")
+                service = VieNeuTTSService()
                 manifest_path, completed, total = service.run(
                     paths.translated_json,
                     "Ngọc Lan",
