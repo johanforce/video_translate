@@ -13,7 +13,7 @@ class AppSettings:
     max_height: int = 1080
     allow_playlists: bool = False
     gemini_model: str = "gemini-3.6-flash"
-    vieneu_voice: str = "Ngọc Lan"
+    vieneu_voice: str = "Hải Đăng"
 
     @classmethod
     def load(cls) -> "AppSettings":
@@ -26,5 +26,5 @@ class AppSettings:
         return cls(
             output_dir=output_dir,
             gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip(),
-            vieneu_voice=os.getenv("VIENEU_DEFAULT_VOICE", "Ngọc Lan").strip(),
+            vieneu_voice=os.getenv("VIENEU_DEFAULT_VOICE", "Hải Đăng").strip(),
         )
