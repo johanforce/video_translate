@@ -37,13 +37,13 @@ Python desktop application for contextual Vietnamese film translation and dubbin
 - Translation response is checkpointed immediately, before QC. If Gemini fails during QC, restart reuses the translation and retries only QC.
 - Exports Vietnamese JSON, SRT and a quality report.
 
-### v0.5 — VieNeu TTS
-- Loads the current VieNeu v4 voice catalogue.
-- Creates one audio file per translated dialogue segment.
-- Persists request keys and job IDs before/after submitting TTS jobs.
-- Reuses completed audio and resumes polling accepted jobs.
-- Legacy v0.5 cache manifests are migrated without regenerating matching audio.
-- Only supported v4 inline performance cues are sent to the TTS engine.
+### v0.5 — Local VieNeu TTS
+- Uses the official on-device `vieneu` Python SDK (VieNeu-TTS v3 Turbo); no VieNeu Cloud API, API key, or per-character billing.
+- Runs locally via ONNX/CPU by default and can auto-select the PyTorch backend on supported CUDA systems.
+- Downloads the model on first use; after the model is cached, synthesis can run offline.
+- Creates one WAV per translated dialogue segment and reuses completed audio from the local manifest.
+- Applies the speed control locally with FFmpeg pitch-preserving time-stretch.
+- Uses the SDK's bundled preset voice catalogue and supported inline emotion cues.
 
 ### v0.6 — Audio timeline and final MP4
 - Places each prepared speech clip at its absolute transcript timestamp.
@@ -69,8 +69,8 @@ Python desktop application for contextual Vietnamese film translation and dubbin
 - FFmpeg and ffprobe available on PATH.
 - FFmpeg build with `libass` for hard/burned subtitles.
 - Gemini API key.
-- VieNeu Cloud API key.
-- Internet access for source download, first Whisper model download and API calls.
+- VieNeu SDK package (`vieneu`) and eSpeak NG.
+- Internet access for source download, first Whisper model download, first VieNeu model download and Gemini requests. VieNeu synthesis itself is local.
 
 ## Windows setup
 
@@ -83,7 +83,7 @@ Copy-Item .env.example .env
 python main.py
 ```
 
-Edit `.env` and set `GEMINI_API_KEY` and `VIENEU_API_KEY`. Never commit `.env`.
+Edit `.env` and set `GEMINI_API_KEY`. VieNeu local SDK does not need an API key. On Windows, install eSpeak NG from the official [eSpeak NG releases](https://github.com/espeak-ng/espeak-ng/releases) before running the TTS stage. Never commit `.env`.
 
 ## macOS / Linux setup
 
@@ -115,13 +115,13 @@ All durable project data is stored beside the output project:
 - `<movie>.context.json` — chapter-by-chapter Gemini context checkpoint.
 - `<movie>.vi.translation.json` — translation, pending translation/QC responses and completed batches.
 - `<movie>.vi.srt` / `<movie>.vi.quality.json` — Vietnamese subtitles and QC report.
-- `<movie>.tts/manifest.json` — VieNeu job IDs, idempotency keys, request signatures and completed audio paths.
+- `<movie>.tts/manifest.json` — local SDK engine/voice settings, segment signatures and completed audio paths.
 - `<movie>.tts/prepared/` — audio timeline clip cache and prepared timeline state.
 - `<movie>.tts/narration.wav` / `timeline.json` — completed speech mix and timeline.
 - `<movie>.vi.dubbed.mp4` / `.render.json` — final render and artifact fingerprints.
 - `<movie>.project.json` — project stages and history.
 
-If Gemini returns a valid translation and then the QC call fails, the translation response is checkpointed before QC; the next run retries QC only. Context chapter responses and the final context response are also saved before profile consolidation. If the application closes between Whisper chunks, completed chunks are skipped. VieNeu request keys are written before submission and job IDs immediately after acceptance, so a restarted run polls the same job rather than creating a duplicate. If the application closes during MP4 rendering, the incomplete output is discarded and rendering is repeated from cached narration/TTS/prepared clips—not from Gemini or VieNeu.
+If Gemini returns a valid translation and then the QC call fails, the translation response is checkpointed before QC; the next run retries QC only. Context chapter responses and the final context response are also saved before profile consolidation. If the application closes between Whisper chunks, completed chunks are skipped. VieNeu audio is generated locally. Completed segment WAV files are committed to the manifest and reused after restart; a crash during one segment only requires regenerating that local segment. If the application closes during MP4 rendering, the incomplete output is discarded and rendering is repeated from cached narration/TTS/prepared clips—not from Gemini or VieNeu.
 
 Do not delete `.video_translator_cache`, `.tts` or project JSON files if you want to resume from previous work. API keys are read from `.env` or can be entered in the app; they are not written to project files.
 
@@ -131,7 +131,7 @@ Do not delete `.video_translator_cache`, `.tts` or project JSON files if you wan
 - Soft subtitles use MP4 `mov_text` and can be toggled by the player.
 - Hard subtitles are burned into the picture and require FFmpeg `libass`.
 - “Duck original audio” currently lowers the source track to 18% under narration; it is a fixed reduction rather than dynamic sidechain ducking.
-- VieNeu TTS audio is generated one segment at a time. A very long spoken line can still overlap the next dialogue; the timeline builder applies a moderate speed-up and records warnings rather than changing source timestamps.
+- VieNeu v3 Turbo generates local 48 kHz WAV audio one segment at a time. A very long spoken line can still overlap the next dialogue; the timeline builder applies a moderate speed-up and records warnings rather than changing source timestamps.
 - Speaker diarization is not included yet; `speaker_id` remains null unless supplied by a future upstream stage.
 
 ## Tests
@@ -149,7 +149,7 @@ CI runs Python 3.11 and 3.12 and installs FFmpeg so the final MP4 render path is
 - [x] 0.2 Chunked Whisper transcription with resume
 - [x] 0.3 Gemini movie context
 - [x] 0.4 Contextual translation and QC
-- [x] 0.5 VieNeu TTS
+- [x] 0.5 Local VieNeu SDK TTS
 - [x] 0.6 Audio timeline, subtitles and MP4 rendering
 - [x] 0.7 Project state and crash recovery
 
