@@ -17,6 +17,7 @@ from video_translator.gemini.project_paths import MovieProjectPaths
 from video_translator.rendering.render_service import RenderService
 from video_translator.transcription.service import TranscriptionService
 from video_translator.tts.tts_service import VieNeuTTSService
+from video_translator.tts.vieneu_client import VieNeuClient
 
 
 ProgressCallback = Callable[[TranscriptionProgress], None]
@@ -266,6 +267,20 @@ class ProjectPipelineService:
                         voice_speed = float(saved_tts.get("speed", voice_speed))
             except (OSError, ValueError, TypeError):
                 pass
+
+        requested_voice_id = voice_id
+        try:
+            voice_id = VieNeuClient.resolve_voice_id(
+                requested_voice,
+                self.settings.vieneu_voice,
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Không tải được preset voice từ VieNeu SDK: {exc}") from exc
+        if requested_voice != voice_id:
+            self._log(
+                f"Giọng lưu từ Cloud v4 '{requested_voice or 'trống'}' không có trong SDK local; "
+                f"chuyển sang preset '{voice_id}'."
+            )
 
         # 4. Per-line local VieNeu SDK synthesis. Completed WAV files are reused from cache.
         run_stage(
