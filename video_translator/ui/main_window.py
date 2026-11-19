@@ -369,11 +369,6 @@ class MainWindow(QMainWindow):
             self._row(self.translation_input, self.translation_browse_button),
         )
 
-        self.vieneu_key_input = QLineEdit()
-        self.vieneu_key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.vieneu_key_input.setPlaceholderText("Để trống để dùng VIENEU_API_KEY trong .env")
-        form.addRow("VieNeu API key", self.vieneu_key_input)
-
         voice_row = QHBoxLayout()
         self.voice_combo = QComboBox()
         self.voice_combo.setMinimumWidth(300)
@@ -381,7 +376,7 @@ class MainWindow(QMainWindow):
         self.voice_refresh_button.clicked.connect(self._refresh_voices)
         voice_row.addWidget(self.voice_combo, 1)
         voice_row.addWidget(self.voice_refresh_button)
-        form.addRow("Giọng đọc (engine v4)", voice_row)
+        form.addRow("Giọng đọc (SDK local · v3 Turbo)", voice_row)
 
         self.voice_speed_spin = QDoubleSpinBox()
         self.voice_speed_spin.setRange(0.5, 3.0)
@@ -397,8 +392,9 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.tts_button)
 
         hint = QLabel(
-            "Mỗi câu có job ID, idempotency key và file cache riêng. Nếu ứng dụng dừng "
-            "sau khi VieNeu nhận job, lần chạy sau sẽ poll lại job cũ thay vì gửi job mới."
+            "VieNeu chạy trực tiếp trên máy bằng SDK v3 Turbo, không cần API key và không "
+            "tính phí theo ký tự. Model được tải ở lần chạy đầu; các lần sau có thể chạy offline. "
+            "Audio từng câu được lưu cache để tiếp tục nếu ứng dụng bị dừng."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #9CA3AF;")
@@ -717,10 +713,9 @@ class MainWindow(QMainWindow):
     def _refresh_voices(self) -> None:
         if self.voice_worker and self.voice_worker.isRunning():
             return
-        api_key = self.vieneu_key_input.text().strip() or os.getenv("VIENEU_API_KEY", "").strip()
         self.voice_refresh_button.setEnabled(False)
-        self._append_log("Đang tải danh sách VieNeu v4...")
-        self.voice_worker = VoiceListWorker(api_key)
+        self._append_log("Đang đọc danh sách preset của VieNeu SDK local...")
+        self.voice_worker = VoiceListWorker()
         self.voice_worker.loaded.connect(self._on_voices_loaded)
         self.voice_worker.failed.connect(self._on_voice_list_failed)
         self.voice_worker.finished.connect(
@@ -732,13 +727,6 @@ class MainWindow(QMainWindow):
         translated_path = Path(self.translation_input.text().strip()).expanduser()
         if not translated_path.is_file():
             QMessageBox.warning(self, "Thiếu bản dịch", "Hãy chọn file bản dịch JSON.")
-            return
-        api_key = self.vieneu_key_input.text().strip() or os.getenv("VIENEU_API_KEY", "").strip()
-        if not api_key:
-            QMessageBox.warning(
-                self, "Thiếu VieNeu API key",
-                "Nhập API key tại đây hoặc cấu hình VIENEU_API_KEY trong .env.",
-            )
             return
         voice_id = self.voice_combo.currentData()
         if not voice_id:
@@ -760,9 +748,9 @@ class MainWindow(QMainWindow):
         answer = QMessageBox.question(
             self,
             "Xác nhận tạo giọng",
-            f"Sẽ kiểm tra/tổng hợp tối đa {pending} đoạn thoại bằng VieNeu.\n"
-            "Các đoạn đã có audio sẽ không gọi API lại. Job đã nhận sẽ được resume bằng ID cũ.\n"
-            "Mỗi đoạn mới có thể bị tính phí theo ký tự. Tiếp tục?",
+            f"Sẽ tổng hợp tối đa {pending} đoạn thoại bằng VieNeu SDK v3 Turbo ngay trên máy.\n"
+            "Các audio đã có sẽ được dùng lại từ cache. Lần chạy đầu có thể cần tải model.\n"
+            "Không gửi nội dung lên Cloud API và không tính phí theo ký tự. Tiếp tục?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -774,7 +762,6 @@ class MainWindow(QMainWindow):
         self._active_stage = "tts"
         self._mark_stage_running("tts")
         self.worker = TTSWorker(
-            api_key=api_key,
             translated_json=translated_path,
             voice_id=str(voice_id),
             speed=float(self.voice_speed_spin.value()),
@@ -867,10 +854,6 @@ class MainWindow(QMainWindow):
             self.gemini_key_input.text().strip()
             or os.getenv("GEMINI_API_KEY", "").strip()
         )
-        vieneu_key = (
-            self.vieneu_key_input.text().strip()
-            or os.getenv("VIENEU_API_KEY", "").strip()
-        )
         source_language = self.language_combo.currentData()
         if source_language == "auto":
             source_language = None
@@ -898,8 +881,7 @@ class MainWindow(QMainWindow):
             except (OSError, ValueError, TypeError):
                 pass
 
-        # Existing completed TTS cache is not billed again. For a new TTS stage,
-        # warn before submitting any voice jobs because the service may charge by text.
+        # Completed local audio is reused. A new TTS stage runs on this machine only.
         pending_voice_count = None
         if transcript_path is not None and transcript_path.is_file():
             try:
@@ -927,12 +909,12 @@ class MainWindow(QMainWindow):
 
         message = (
             "Chạy hoặc tiếp tục toàn bộ quy trình. Các transcript, chapter Gemini, "
-            "batch dịch/QC, job VieNeu và audio đã hoàn thành sẽ được dùng lại từ cache."
+            "batch dịch/QC và audio VieNeu SDK local đã hoàn thành sẽ được dùng lại từ cache."
         )
         if pending_voice_count:
             message += (
-                f"\n\nHiện có tối đa {pending_voice_count} câu cần tạo giọng mới. "
-                "VieNeu có thể tính phí theo ký tự; các job đã nhận sẽ được resume bằng job ID cũ."
+                f"\n\nHiện có tối đa {pending_voice_count} câu cần tạo audio local mới. "
+                "Lần đầu có thể cần tải model VieNeu SDK."
             )
         answer = QMessageBox.question(
             self,
@@ -956,7 +938,6 @@ class MainWindow(QMainWindow):
             gemini_api_key=gemini_key,
             gemini_model=str(self.gemini_model_combo.currentData()),
             translation_batch_size=self.translation_batch_spin.value(),
-            vieneu_api_key=vieneu_key,
             voice_id=voice_id,
             voice_speed=speed,
             subtitle_mode=str(self.subtitle_mode_combo.currentData()),
@@ -1107,7 +1088,7 @@ class MainWindow(QMainWindow):
             selected_index = self.voice_combo.findData(selected)
         if selected_index >= 0:
             self.voice_combo.setCurrentIndex(selected_index)
-        self._append_log(f"Đã tải {len(voices)} giọng VieNeu v4.")
+        self._append_log(f"Đã tải {len(voices)} giọng preset VieNeu SDK v3 Turbo.")
         self._update_action_states()
         if not voices:
             QMessageBox.warning(self, "VieNeu", "Danh sách giọng hiện đang trống.")
@@ -1183,7 +1164,6 @@ class MainWindow(QMainWindow):
             self.translate_button,
             self.translation_input,
             self.translation_browse_button,
-            self.vieneu_key_input,
             self.voice_combo,
             self.voice_refresh_button,
             self.voice_speed_spin,
