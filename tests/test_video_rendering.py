@@ -12,6 +12,16 @@ from video_translator.rendering.media_tools import probe_media
 from video_translator.rendering.video_renderer import VideoRenderer
 
 
+class SubtitleStyleTests(unittest.TestCase):
+    def test_hard_subtitles_use_white_text_on_solid_black_background(self) -> None:
+        subtitle_filter = VideoRenderer._subtitle_filter(Path("subtitle.srt"))
+
+        self.assertIn("PrimaryColour=&H00FFFFFF", subtitle_filter)
+        self.assertIn("BorderStyle=3", subtitle_filter)
+        self.assertIn("BackColour=&H00000000", subtitle_filter)
+        self.assertNotIn("BorderStyle=1", subtitle_filter)
+
+
 @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "FFmpeg not installed")
 class VideoRenderingTests(unittest.TestCase):
     def test_render_mp4_with_soft_subtitle_and_reuse_render_cache(self) -> None:
