@@ -21,6 +21,9 @@ class VieNeuClientTests(unittest.TestCase):
         }
 
         class Resource:
+            def joinpath(self, *_args):
+                return self
+
             def open(self, *_args, **_kwargs):
                 return io.StringIO(json.dumps(payload))
 
