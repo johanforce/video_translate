@@ -99,7 +99,7 @@ python main.py
 
 1. **Video & Transcript** — paste a YouTube/Bilibili URL or choose a local video; download and transcribe.
 2. **Gemini Film Translation** — analyze the whole transcript, then translate and QC.
-3. **VieNeu Dubbing** — load v4 voices, choose a voice and speed, then synthesize each segment.
+3. **VieNeu Dubbing** — load local SDK preset voices, choose a voice and speed, then synthesize each segment.
 4. **Project & Export** — open an existing transcript or enter a video URL/local file, choose subtitle/audio options, then press **Chạy toàn bộ / Tiếp tục project**.
 
 The single pipeline action checks every stage in order and skips matching completed artifacts. On a new project it downloads/transcribes/analyzes/translates/dubs/renders; on restart it resumes only incomplete work. VieNeu synthesis runs on-device; the manifest restores the saved SDK voice and reuses completed WAV files.
@@ -123,7 +123,7 @@ All durable project data is stored beside the output project:
 
 If Gemini returns a valid translation and then the QC call fails, the translation response is checkpointed before QC; the next run retries QC only. Context chapter responses and the final context response are also saved before profile consolidation. If the application closes between Whisper chunks, completed chunks are skipped. VieNeu audio is generated locally. Completed segment WAV files are committed to the manifest and reused after restart; a crash during one segment only requires regenerating that local segment. If the application closes during MP4 rendering, the incomplete output is discarded and rendering is repeated from cached narration/TTS/prepared clips—not from Gemini or VieNeu.
 
-Do not delete `.video_translator_cache`, `.tts` or project JSON files if you want to resume from previous work. API keys are read from `.env` or can be entered in the app; they are not written to project files.
+Do not delete `.video_translator_cache`, `.tts` or project JSON files if you want to resume from previous work. Gemini API keys are read from `.env` or can be entered in the app; VieNeu does not use an API key.
 
 ## Output and synchronization notes
 
@@ -141,7 +141,7 @@ python -m compileall -q main.py video_translator tests
 python -m unittest discover -s tests -v
 ```
 
-CI runs Python 3.11 and 3.12 and installs FFmpeg so the final MP4 render path is integration-tested with generated sample media. Tests mock Gemini/VieNeu requests; no live API calls or paid credits are used in CI.
+CI runs Python 3.11 and 3.12 and installs FFmpeg so the final MP4 render path is integration-tested with generated sample media. Tests mock Gemini requests and the local VieNeu SDK; no live API calls or paid credits are used in CI.
 
 ## Roadmap
 
