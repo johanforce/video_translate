@@ -74,6 +74,25 @@ class VieNeuClient:
             )
         return result
 
+    @classmethod
+    def resolve_voice_id(
+        cls,
+        requested_voice: str = "",
+        fallback_voice: str = "Hải Đăng",
+    ) -> str:
+        """Resolve legacy Cloud voice IDs to a valid local SDK preset."""
+        voices = cls.list_voices()
+        available = {str(item["id"]) for item in voices}
+        requested = (requested_voice or "").strip()
+        if requested in available:
+            return requested
+        fallback = (fallback_voice or "").strip()
+        if fallback in available:
+            return fallback
+        if voices:
+            return str(voices[0]["id"])
+        raise VieNeuError("VieNeu SDK không có preset voice nào khả dụng.")
+
     def _get_engine(self) -> Any:
         if self._engine is not None:
             return self._engine
