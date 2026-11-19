@@ -93,8 +93,9 @@ class FullPipelineCacheTests(unittest.TestCase):
                     "translation_fingerprint": sha256_text(
                         paths.translated_json.read_text(encoding="utf-8")
                     ),
-                    "voice_id": "voice-test",
+                    "voice_id": "Hải Đăng",
                     "speed": 1.0,
+                    "engine": "v3turbo",
                     "segments": {
                         "1": {"status": "completed", "audio_path": str(audio)}
                     },
@@ -125,7 +126,7 @@ class FullPipelineCacheTests(unittest.TestCase):
                 gemini_api_key="",
                 gemini_model="gemini-test",
                 translation_batch_size=30,
-                voice_id="voice-test",
+                voice_id="Hải Đăng",
                 voice_speed=1.0,
                 subtitle_mode="both",
                 original_audio_mode="duck",
