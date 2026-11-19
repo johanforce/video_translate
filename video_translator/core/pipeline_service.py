@@ -271,7 +271,7 @@ class ProjectPipelineService:
         requested_voice_id = voice_id
         try:
             voice_id = VieNeuClient.resolve_voice_id(
-                requested_voice,
+                requested_voice_id,
                 self.settings.vieneu_voice,
             )
         except Exception as exc:
