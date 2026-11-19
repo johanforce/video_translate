@@ -14,14 +14,10 @@ class VoiceListWorker(QThread):
     loaded = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, api_key: str = "") -> None:
-        super().__init__()
-        self.api_key = api_key
-
     def run(self) -> None:
         try:
-            voices = VieNeuClient.list_voices(self.api_key)
-            self.loaded.emit(voices)
+            # Reads the SDK's bundled catalogue; does not initialize or download the model.
+            self.loaded.emit(VieNeuClient.list_voices())
         except Exception as exc:
             self.failed.emit(str(exc))
 
@@ -35,13 +31,11 @@ class TTSWorker(QThread):
 
     def __init__(
         self,
-        api_key: str,
         translated_json: Path,
         voice_id: str,
         speed: float,
     ) -> None:
         super().__init__()
-        self.api_key = api_key
         self.translated_json = translated_json
         self.voice_id = voice_id
         self.speed = speed
@@ -53,7 +47,6 @@ class TTSWorker(QThread):
     def run(self) -> None:
         try:
             service = VieNeuTTSService(
-                api_key=self.api_key,
                 progress_callback=self.progress_changed.emit,
                 log_callback=self.log_message.emit,
             )
