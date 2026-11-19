@@ -859,7 +859,7 @@ class MainWindow(QMainWindow):
             source_language = None
 
         selected_voice = self.voice_combo.currentData()
-        voice_id = str(selected_voice) if selected_voice else ""
+        voice_id = str(selected_voice) if selected_voice else self.settings.vieneu_voice
         speed = float(self.voice_speed_spin.value())
 
         # When reopening a project, the user may not have loaded the VieNeu catalogue.
@@ -1072,20 +1072,25 @@ class MainWindow(QMainWindow):
         )
 
     def _on_voices_loaded(self, voices: list[dict]) -> None:
-        selected = self.voice_combo.currentData() or self.settings.vieneu_voice
+        selected = str(self.voice_combo.currentData() or self.settings.vieneu_voice)
         self.voice_combo.clear()
         for voice in voices:
             label = voice["name"]
             description = voice.get("description", "")
             if description:
                 label = f"{label} — {description}"
-            if voice.get("kind") == "cloned":
-                label = f"{label} [Clone]"
             self.voice_combo.addItem(label, voice["id"])
         selected_index = self.voice_combo.findData(selected)
-        if selected_index < 0 and selected:
-            self.voice_combo.addItem(f"Saved project voice · {selected}", selected)
-            selected_index = self.voice_combo.findData(selected)
+        if selected_index < 0 and voices:
+            fallback = self.settings.vieneu_voice
+            selected_index = self.voice_combo.findData(fallback)
+            if selected_index < 0:
+                selected_index = 0
+            fallback_id = self.voice_combo.itemData(selected_index)
+            self._append_log(
+                f"Giọng '{selected}' không có trong VieNeu SDK local; "
+                f"đã chuyển sang preset '{fallback_id}'."
+            )
         if selected_index >= 0:
             self.voice_combo.setCurrentIndex(selected_index)
         self._append_log(f"Đã tải {len(voices)} giọng preset VieNeu SDK v3 Turbo.")
@@ -1304,11 +1309,16 @@ class MainWindow(QMainWindow):
         if saved_voice:
             voice_id = str(saved_voice)
             index = self.voice_combo.findData(voice_id)
-            if index < 0:
-                self.voice_combo.addItem(f"Project voice · {voice_id}", voice_id)
-                index = self.voice_combo.findData(voice_id)
             if index >= 0:
                 self.voice_combo.setCurrentIndex(index)
+            else:
+                fallback_index = self.voice_combo.findData(self.settings.vieneu_voice)
+                if fallback_index >= 0:
+                    self.voice_combo.setCurrentIndex(fallback_index)
+                    self._append_log(
+                        f"Project cũ dùng giọng '{voice_id}' của Cloud v4; "
+                        f"SDK local sẽ dùng preset '{self.settings.vieneu_voice}'."
+                    )
         if saved_speed is not None:
             try:
                 self.voice_speed_spin.setValue(float(saved_speed))
