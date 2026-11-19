@@ -60,6 +60,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("VideoTranslator — Vietnamese Film Dubbing Studio")
         self.resize(1080, 940)
         self._build_ui()
+        # Populate the dropdown from the installed local SDK at startup. This only
+        # reads the bundled voice catalogue; the TTS model itself loads on first use.
+        self._refresh_voices()
 
     def _build_ui(self) -> None:
         root = QWidget(self)
@@ -372,11 +375,11 @@ class MainWindow(QMainWindow):
         voice_row = QHBoxLayout()
         self.voice_combo = QComboBox()
         self.voice_combo.setMinimumWidth(300)
-        self.voice_refresh_button = QPushButton("Tải danh sách giọng")
+        self.voice_refresh_button = QPushButton("Nạp lại giọng SDK")
         self.voice_refresh_button.clicked.connect(self._refresh_voices)
         voice_row.addWidget(self.voice_combo, 1)
         voice_row.addWidget(self.voice_refresh_button)
-        form.addRow("Giọng đọc (SDK local · v3 Turbo)", voice_row)
+        form.addRow("Giọng đọc có sẵn trong SDK local", voice_row)
 
         self.voice_speed_spin = QDoubleSpinBox()
         self.voice_speed_spin.setRange(0.5, 3.0)
