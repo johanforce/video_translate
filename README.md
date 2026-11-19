@@ -102,7 +102,7 @@ python main.py
 3. **VieNeu Dubbing** — load v4 voices, choose a voice and speed, then synthesize each segment.
 4. **Project & Export** — open an existing transcript or enter a video URL/local file, choose subtitle/audio options, then press **Chạy toàn bộ / Tiếp tục project**.
 
-The single pipeline action checks every stage in order and skips matching completed artifacts. On a new project it downloads/transcribes/analyzes/translates/dubs/renders; on restart it resumes only incomplete work. If TTS has already submitted jobs, it restores the saved voice configuration and resumes the existing job IDs.
+The single pipeline action checks every stage in order and skips matching completed artifacts. On a new project it downloads/transcribes/analyzes/translates/dubs/renders; on restart it resumes only incomplete work. VieNeu synthesis runs on-device; the manifest restores the saved SDK voice and reuses completed WAV files.
 
 ## Cache and recovery behavior
 
