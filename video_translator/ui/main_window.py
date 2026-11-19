@@ -859,7 +859,7 @@ class MainWindow(QMainWindow):
             source_language = None
 
         selected_voice = self.voice_combo.currentData()
-        voice_id = str(selected_voice) if selected_voice else self.settings.vieneu_voice
+        voice_id = str(selected_voice) if selected_voice else ""
         speed = float(self.voice_speed_spin.value())
 
         # When reopening a project, the user may not have loaded the VieNeu catalogue.
@@ -880,6 +880,8 @@ class MainWindow(QMainWindow):
                         self.voice_speed_spin.setValue(speed)
             except (OSError, ValueError, TypeError):
                 pass
+        if not voice_id:
+            voice_id = self.settings.vieneu_voice
 
         # Completed local audio is reused. A new TTS stage runs on this machine only.
         pending_voice_count = None
