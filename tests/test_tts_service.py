@@ -53,7 +53,7 @@ class TTSServiceTests(unittest.TestCase):
             "[cười] Tôi không tin nổi!",
         )
         self.assertEqual(
-            VieNeuTTSService._apply_v4_cues(
+            VieNeuTTSService._apply_v3_cues(
                 "Tôi không tin nổi!",
                 {"delivery": "shouting", "emotion": "angry"},
             ),
