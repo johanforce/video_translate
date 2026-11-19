@@ -125,7 +125,6 @@ class FullPipelineCacheTests(unittest.TestCase):
                 gemini_api_key="",
                 gemini_model="gemini-test",
                 translation_batch_size=30,
-                vieneu_api_key="",
                 voice_id="voice-test",
                 voice_speed=1.0,
                 subtitle_mode="both",
