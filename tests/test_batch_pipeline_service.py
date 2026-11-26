@@ -90,6 +90,28 @@ class BatchPipelineServiceTests(unittest.TestCase):
 
         self.assertEqual(factory.calls, ["key-one"] * 5)
 
+    def test_api_keys_are_redacted_from_failure_logs(self):
+        secret = "secret-key-123"
+        factory = FakeFactory([f"invalid API key {secret}"] * 5)
+        messages = []
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = BatchPipelineService(
+                pipeline_factory=factory,
+                log_callback=messages.append,
+            )
+            with self.assertRaises(BatchApiKeysExhaustedError) as raised:
+                service.run(
+                    urls=["https://youtu.be/abc123"],
+                    api_keys=[secret],
+                    output_dir=Path(temp_dir),
+                    retry_delay_seconds=0,
+                )
+
+        combined = "\\n".join(messages) + str(raised.exception)
+        self.assertNotIn(secret, combined)
+        self.assertIn("[REDACTED]", combined)
+
     def test_rejects_invalid_url_before_running_pipeline(self):
         factory = FakeFactory()
 
