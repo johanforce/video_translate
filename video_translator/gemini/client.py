@@ -46,6 +46,7 @@ class GeminiJsonClient:
         max_attempts: int = 4,
         debug_path: Path | None = None,
         max_output_tokens: int = 8192,
+        expected_root_key: str | None = None,
     ) -> dict[str, Any]:
         cancel_event = cancel_event or threading.Event()
         config = self._types.GenerateContentConfig(
@@ -79,7 +80,7 @@ class GeminiJsonClient:
                         raise GeminiOutputLimitError(message)
                     raise GeminiClientError("Gemini trả về nội dung rỗng.")
                 try:
-                    return self._parse_json(response_text)
+                    return self._parse_json(response_text, expected_root_key=expected_root_key)
                 except GeminiClientError as parse_error:
                     diagnostics = self._response_diagnostics(response)
                     saved_path = self._save_raw_response(debug_path, response_text)
@@ -92,24 +93,32 @@ class GeminiJsonClient:
                     if self._hit_output_limit(response):
                         raise GeminiOutputLimitError(message) from parse_error
 
-                    # A normal STOP with malformed JSON is not an output-limit
-                    # failure. Give the model one syntax-only repair attempt before
-                    # failing the chapter; do not re-run the chapter analysis.
+                    # A normal STOP with malformed JSON or an unexpected root
+                    # shape is not an output-limit failure. Give the model one
+                    # syntax/shape repair attempt before failing the current request.
                     if cancel_event.is_set():
                         raise GeminiClientError("Đã hủy tác vụ Gemini.") from parse_error
                     repair_system = (
-                        "You are a strict JSON syntax repair tool. "
-                        "Return exactly one valid JSON object. Repair syntax only: "
-                        "preserve every key, value, list item, and meaning from the "
-                        "provided text. Do not summarize, translate, infer, add, or "
-                        "remove information. Do not include Markdown fences or prose."
+                        "You are a strict JSON syntax and shape repair tool. "
+                        "Return exactly one valid JSON object. Preserve all source "
+                        "information, IDs, values, and list items. Repair syntax or "
+                        "root shape only; do not summarize, translate, infer, or "
+                        "change the meaning. Do not include Markdown fences or prose."
+                    )
+                    expected_shape = (
+                        f"The required top-level array field is '{expected_root_key}'. "
+                        "If the entire input is an array of records for that field, "
+                        f"wrap it as {{\\"{expected_root_key}\\": <array>}}. "
+                        if expected_root_key
+                        else "The expected root type is a JSON object. "
                     )
                     repair_prompt = (
-                        "The following model response was intended to be a JSON object "
-                        "but Python's JSON parser rejected it. Repair only the JSON "
-                        "syntax and return the complete corrected object.\n\n"
-                        f"Parser error: {parse_error}\n\n"
-                        "INVALID RESPONSE TO REPAIR:\n"
+                        "The following response was intended to be a JSON object, "
+                        "but its syntax or root JSON type/shape was invalid. "
+                        "Repair it and return the complete corrected object. "
+                        + expected_shape
+                        + f"Validation error: {parse_error}\n\n"
+                        + "RESPONSE TO REPAIR:\n"
                         + response_text
                     )
                     repair_config = self._types.GenerateContentConfig(
@@ -147,7 +156,7 @@ class GeminiJsonClient:
                         ) from parse_error
 
                     try:
-                        repaired_value = self._parse_json(repaired_text)
+                        repaired_value = self._parse_json(repaired_text, expected_root_key=expected_root_key)
                     except GeminiClientError as repair_error:
                         repair_diagnostics = self._response_diagnostics(
                             repaired_response
@@ -204,20 +213,39 @@ class GeminiJsonClient:
         raise GeminiClientError(self._friendly_error(last_error or RuntimeError("Unknown error")))
 
     @staticmethod
-    def _parse_json(text: str) -> dict[str, Any]:
+    def _parse_json(
+        text: str,
+        expected_root_key: str | None = None,
+    ) -> dict[str, Any]:
         cleaned = text.strip()
         fence = chr(96) * 3
         if cleaned.startswith(fence):
-            cleaned = re.sub(r"^" + re.escape(fence) + r"(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
-            cleaned = re.sub(r"\s*" + re.escape(fence) + r"$", "", cleaned)
+            cleaned = re.sub(
+                r"^" + re.escape(fence) + r"(?:json)?\\s*",
+                "",
+                cleaned,
+                flags=re.IGNORECASE,
+            )
+            cleaned = re.sub(r"\\s*" + re.escape(fence) + r"$", "", cleaned)
         try:
             value = json.loads(cleaned)
         except json.JSONDecodeError as exc:
             raise GeminiClientError(
                 f"Gemini không trả về JSON hợp lệ (dòng {exc.lineno}, cột {exc.colno})."
             ) from exc
+
+        # Gemini occasionally emits the requested collection as the JSON root
+        # array, despite the prompt asking for an object. When the caller knows
+        # the one unambiguous collection key, normalize that shape locally.
+        if isinstance(value, list) and expected_root_key:
+            return {expected_root_key: value}
+
         if not isinstance(value, dict):
-            raise GeminiClientError("Gemini phải trả về một JSON object.")
+            root_type = "null" if value is None else type(value).__name__
+            raise GeminiClientError(
+                "Gemini trả về JSON hợp lệ nhưng kiểu dữ liệu gốc là "
+                f"'{root_type}'; yêu cầu JSON object."
+            )
         return value
 
     @staticmethod
