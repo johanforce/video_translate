@@ -41,10 +41,45 @@ class VieNeuClientTests(unittest.TestCase):
         self.assertEqual(voices[0]["engine"], LOCAL_ENGINE)
         self.assertEqual(voices[0]["kind"], "preset")
 
+    def test_lists_renamed_pro_voice_alias_and_preserves_canonical_sdk_id(self) -> None:
+        payload = {
+            "presets": {
+                "Hải Đăng": {
+                    "description": "Nam · Bắc · Phong cách tự nhiên",
+                    "featured": 5,
+                    "gender": "male",
+                    "aliases": ["Minh Quân Pro", "Minh Quân"],
+                }
+            }
+        }
+
+        class Resource:
+            def joinpath(self, *_args):
+                return self
+
+            def open(self, *_args, **_kwargs):
+                return io.StringIO(json.dumps(payload))
+
+        class PackageResources:
+            def joinpath(self, *_args):
+                return Resource()
+
+        with patch(
+            "video_translator.tts.vieneu_client.importlib.resources.files",
+            return_value=PackageResources(),
+        ):
+            voices = VieNeuClient.list_voices()
+
+        self.assertEqual(len(voices), 1)
+        self.assertEqual(voices[0]["id"], "Hải Đăng")
+        self.assertEqual(voices[0]["name"], "Minh Quân Pro")
+        self.assertEqual(voices[0]["aliases"], ["Minh Quân Pro", "Minh Quân"])
+        self.assertIn("Hải Đăng", voices[0]["description"])
+
     def test_legacy_cloud_voice_resolves_to_local_preset(self) -> None:
         voices = [
-            {"id": "Hải Đăng"},
-            {"id": "Trúc Ly"},
+            {"id": "Hải Đăng", "aliases": ["Minh Quân Pro", "Minh Quân"]},
+            {"id": "Trúc Ly", "aliases": []},
         ]
         with patch.object(VieNeuClient, "list_voices", return_value=voices):
             self.assertEqual(
@@ -54,6 +89,14 @@ class VieNeuClientTests(unittest.TestCase):
             self.assertEqual(
                 VieNeuClient.resolve_voice_id("Trúc Ly", "Hải Đăng"),
                 "Trúc Ly",
+            )
+            self.assertEqual(
+                VieNeuClient.resolve_voice_id("Minh Quân Pro", "Hải Đăng"),
+                "Hải Đăng",
+            )
+            self.assertEqual(
+                VieNeuClient.resolve_voice_id("Minh Quân", "Hải Đăng"),
+                "Hải Đăng",
             )
 
     def test_missing_sdk_shows_install_command(self) -> None:
