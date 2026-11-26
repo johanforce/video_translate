@@ -108,7 +108,7 @@ class GeminiJsonClient:
                     expected_shape = (
                         f"The required top-level array field is '{expected_root_key}'. "
                         "If the entire input is an array of records for that field, "
-                        f"wrap it as {{\\"{expected_root_key}\\": <array>}}. "
+                        f'wrap it as {{"{expected_root_key}": <array>}}. '
                         if expected_root_key
                         else "The expected root type is a JSON object. "
                     )
