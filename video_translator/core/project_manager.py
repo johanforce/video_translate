@@ -258,8 +258,6 @@ class ProjectManager:
                 and isinstance(segments, list)
                 and bool(segments)
                 and value.get("source_fingerprint") == source_fingerprint
-                and int(value.get("completed_segments", 0)) == len(segments)
-                and int(value.get("total_segments", 0)) == len(segments)
             ):
                 return False
 
