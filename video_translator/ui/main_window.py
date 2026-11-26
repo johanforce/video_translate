@@ -1611,15 +1611,7 @@ class MainWindow(QMainWindow):
             or Path(self.project_transcript_input.text().strip()).expanduser().is_file()
         )
         if self.project_manager is not None:
-            stages = self.project_manager.state.get("stages", {})
-            next_stage = next(
-                (
-                    stage
-                    for stage in ProjectManager.STAGES
-                    if stages.get(stage, {}).get("status") != "completed"
-                ),
-                None,
-            )
+            next_stage = self.project_manager.next_incomplete_stage()
         else:
             next_stage = "transcription" if has_pipeline_input else None
         self.resume_button.setEnabled(
