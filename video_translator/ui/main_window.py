@@ -976,6 +976,117 @@ class MainWindow(QMainWindow):
         self.worker.succeeded.connect(self._on_render_success)
         self.worker.start()
 
+    def _start_batch_pipeline(self) -> None:
+        urls = [
+            line.strip()
+            for line in self.batch_urls_input.toPlainText().splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        raw_keys = (
+            self.batch_keys_input.toPlainText()
+            .replace(",", "\n")
+            .replace(";", "\n")
+        )
+        api_keys = list(dict.fromkeys(
+            line.strip()
+            for line in raw_keys.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ))
+
+        if not urls:
+            QMessageBox.warning(self, "Thiếu URL", "Hãy nhập ít nhất một URL video.")
+            return
+        if not api_keys:
+            QMessageBox.warning(self, "Thiếu API key", "Hãy nhập ít nhất một Gemini API key.")
+            return
+
+        normalized_urls: list[str] = []
+        for index, url in enumerate(urls, start=1):
+            try:
+                normalized_urls.append(validate_video_url(url))
+            except Exception as exc:
+                QMessageBox.warning(
+                    self,
+                    "URL không hợp lệ",
+                    f"URL dòng {index} không hợp lệ:\n{url}\n\n{exc}",
+                )
+                return
+
+        output_text = self.output_input.text().strip()
+        if not output_text:
+            QMessageBox.warning(
+                self,
+                "Thiếu thư mục đầu ra",
+                "Hãy chọn thư mục dự án trong tab Video & Transcript.",
+            )
+            return
+
+        source_language = self.language_combo.currentData()
+        if source_language == "auto":
+            source_language = None
+        selected_voice = self.voice_combo.currentData()
+        voice_id = str(selected_voice) if selected_voice else self.settings.vieneu_voice
+
+        answer = QMessageBox.question(
+            self,
+            "Xác nhận chạy hàng loạt",
+            f"Sẽ xử lý {len(normalized_urls)} video theo thứ tự bằng "
+            f"{len(api_keys)} Gemini API key.\n\n"
+            "Khi lỗi: chờ 10 giây rồi retry; sau 5 lần lỗi với một key sẽ chuyển key. "
+            "Nếu hết key, toàn bộ hàng đợi sẽ dừng.\n\n"
+            "API key chỉ được giữ trong bộ nhớ của phiên chạy. Bắt đầu?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        self._begin_task("Đang khởi chạy hàng đợi video...")
+        self._active_stage = None
+        self.worker = BatchPipelineWorker(
+            urls=normalized_urls,
+            api_keys=api_keys,
+            output_dir=Path(output_text).expanduser(),
+            whisper_model=str(self.model_combo.currentData()),
+            source_language=source_language,
+            gemini_model=str(self.gemini_model_combo.currentData()),
+            translation_batch_size=self.translation_batch_spin.value(),
+            voice_id=voice_id,
+            voice_speed=float(self.voice_speed_spin.value()),
+            subtitle_mode=str(self.subtitle_mode_combo.currentData()),
+            original_audio_mode=str(self.original_audio_combo.currentData()),
+        )
+        self._connect_common_worker(self.worker)
+        self.worker.succeeded.connect(self._on_batch_pipeline_success)
+        self.worker.start()
+
+    def _on_batch_pipeline_success(self, results: list[dict[str, object]]) -> None:
+        completed = len(results)
+        self.status_label.setText(f"Chạy hàng loạt hoàn tất: {completed} video.")
+        self._append_log(f"[BATCH] Hoàn tất {completed} video.")
+        summary_lines = []
+        for index, result in enumerate(results, start=1):
+            video_path = str(result.get("video") or "")
+            summary_lines.append(f"{index}. {video_path}")
+        if results:
+            last_result = results[-1]
+            transcript_value = last_result.get("transcript")
+            if transcript_value:
+                transcript = Path(str(transcript_value))
+                if transcript.is_file():
+                    self.transcript_input.setText(str(transcript))
+                    self.project_transcript_input.setText(str(transcript))
+                    self.translation_input.setText(str(last_result.get("translation") or ""))
+                    self.render_translation_input.setText(str(last_result.get("translation") or ""))
+                    self._set_project_source(transcript)
+        self._update_action_states()
+        QMessageBox.information(
+            self,
+            "Chạy hàng loạt hoàn tất",
+            f"Đã tạo thành công {completed} video MP4:\n\n"
+            + "\n".join(summary_lines),
+        )
+
     def _resume_project(self) -> None:
         self._start_full_pipeline()
 
@@ -1345,6 +1456,9 @@ class MainWindow(QMainWindow):
         self._busy = busy
         for widget in (
             self.url_input,
+            self.batch_urls_input,
+            self.batch_keys_input,
+            self.batch_start_button,
             self.output_input,
             self.output_browse_button,
             self.video_input,
@@ -1691,6 +1805,11 @@ class MainWindow(QMainWindow):
             not self._busy and translated_path.is_file() and bool(self.voice_combo.currentData())
         )
         self.render_button.setEnabled(not self._busy and render_path.is_file())
+        self.batch_start_button.setEnabled(
+            not self._busy
+            and bool(self.batch_urls_input.toPlainText().strip())
+            and bool(self.batch_keys_input.toPlainText().strip())
+        )
 
     def _append_log(self, message: str) -> None:
         self.log_view.appendPlainText(message)
