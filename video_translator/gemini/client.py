@@ -221,12 +221,12 @@ class GeminiJsonClient:
         fence = chr(96) * 3
         if cleaned.startswith(fence):
             cleaned = re.sub(
-                r"^" + re.escape(fence) + r"(?:json)?\\s*",
+                r"^" + re.escape(fence) + r"(?:json)?\s*",
                 "",
                 cleaned,
                 flags=re.IGNORECASE,
             )
-            cleaned = re.sub(r"\\s*" + re.escape(fence) + r"$", "", cleaned)
+            cleaned = re.sub(r"\s*" + re.escape(fence) + r"$", "", cleaned)
         try:
             value = json.loads(cleaned)
         except json.JSONDecodeError as exc:
