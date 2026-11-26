@@ -165,6 +165,8 @@ class ManualTranslationTests(unittest.TestCase):
         with self.assertRaisesRegex(ManualTranslationError, "trùng segment ID"):
             import_manual_translation(self.transcript_path, self.template_path)
 
+        # Restore a clean template before testing the independent source-text rule.
+        create_manual_translation_template(self.transcript_path, self.template_path)
         payload = self._complete_template()
         payload["segments"][0]["source_text"] = "Changed source"
         self.template_path.write_text(
