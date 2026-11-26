@@ -376,6 +376,12 @@ class ProjectPipelineService:
 
         try:
             if stage == "context":
+                # A complete manual translation has already been reviewed against
+                # this transcript and intentionally bypasses Gemini context analysis.
+                if manager._translation_complete():
+                    manual_translation = read_json(manager.paths.translated_json)
+                    if manual_translation.get("translation_source") == "manual":
+                        return True
                 context = read_json(manager.paths.context_json)
                 transcript = read_json(manager.paths.transcript_json)
                 total_segments = len(transcript.get("segments", []))
@@ -390,6 +396,8 @@ class ProjectPipelineService:
                 )
             if stage == "translation":
                 translated = read_json(manager.paths.translated_json)
+                if translated.get("translation_source") == "manual":
+                    return manager._translation_complete()
                 prompt_signature = (
                     load_prompt("system_prompt.txt")
                     + load_prompt("translation.txt")
