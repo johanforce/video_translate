@@ -237,16 +237,45 @@ class ProjectManager:
             return False
         try:
             value = read_json(self.paths.translated_json)
+            source_fingerprint = self._sha256(self.paths.transcript_json)
+            segments = value.get("segments")
             if not (
                 value.get("is_complete") is True
-                and isinstance(value.get("segments"), list)
-                and bool(value["segments"])
-                and value.get("source_fingerprint") == self._sha256(self.paths.transcript_json)
+                and isinstance(segments, list)
+                and bool(segments)
+                and value.get("source_fingerprint") == source_fingerprint
+                and int(value.get("completed_segments", 0)) == len(segments)
+                and int(value.get("total_segments", 0)) == len(segments)
             ):
                 return False
+
+            # Manual imports are reviewed by the user and carry their own QC
+            # attestation; they deliberately do not require a Gemini context file.
+            if value.get("translation_source") == "manual":
+                review = value.get("manual_review")
+                if not (
+                    isinstance(review, dict)
+                    and review.get("completed") is True
+                    and review.get("source_fingerprint") == source_fingerprint
+                    and review.get("reviewed_segments") == len(segments)
+                    and review.get("total_segments") == len(segments)
+                    and self.paths.quality_json.is_file()
+                ):
+                    return False
+                quality = read_json(self.paths.quality_json)
+                return (
+                    quality.get("source") == "manual"
+                    and quality.get("manual_review_completed") is True
+                    and quality.get("source_fingerprint") == source_fingerprint
+                    and quality.get("translation_fingerprint") == self._sha256(self.paths.translated_json)
+                )
+
             context = read_json(self.paths.context_json)
-            return value.get("context_fingerprint") == self._sha256(self.paths.context_json) and context.get("is_complete") is True
-        except (ValueError, OSError):
+            return (
+                value.get("context_fingerprint") == self._sha256(self.paths.context_json)
+                and context.get("is_complete") is True
+            )
+        except (ValueError, OSError, TypeError):
             return False
 
     def _translation_progress(self) -> int:
