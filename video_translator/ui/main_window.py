@@ -315,7 +315,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(title)
 
         intro = QLabel(
-            "Dán mỗi URL trên một dòng. Nhập các Gemini API key, mỗi key một dòng. "
+            "Dán mỗi URL trên một dòng. Nhập danh sách Gemini API key, ngăn cách bằng dấu phẩy hoặc dấu chấm phẩy. "
             "Tool sẽ tự tải, nhận diện, phân tích/dịch/QC, tạo giọng VieNeu và render MP4 "
             "cho từng URL theo thứ tự."
         )
@@ -333,11 +333,11 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.batch_urls_input)
 
         layout.addWidget(QLabel("DANH SÁCH GEMINI API KEY"))
-        self.batch_keys_input = QPlainTextEdit()
+        self.batch_keys_input = QLineEdit()
+        self.batch_keys_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.batch_keys_input.setPlaceholderText(
-            "AIza...key-1\nAIza...key-2\nAIza...key-3"
+            "Nhập các key, phân tách bằng dấu phẩy hoặc dấu chấm phẩy"
         )
-        self.batch_keys_input.setMinimumHeight(105)
         self.batch_keys_input.textChanged.connect(self._update_action_states)
         layout.addWidget(self.batch_keys_input)
 
@@ -983,7 +983,7 @@ class MainWindow(QMainWindow):
             if line.strip() and not line.strip().startswith("#")
         ]
         raw_keys = (
-            self.batch_keys_input.toPlainText()
+            self.batch_keys_input.text()
             .replace(",", "\n")
             .replace(";", "\n")
         )
