@@ -172,11 +172,11 @@ def import_manual_translation(
 
         emotion = row.get("emotion", "neutral")
         delivery = row.get("delivery", "normal")
-        if emotion not in ALLOWED_EMOTIONS:
+        if not isinstance(emotion, str) or emotion not in ALLOWED_EMOTIONS:
             raise ManualTranslationError(
                 f"emotion của segment {segment_id} không hợp lệ: {emotion!r}."
             )
-        if delivery not in ALLOWED_DELIVERIES:
+        if not isinstance(delivery, str) or delivery not in ALLOWED_DELIVERIES:
             raise ManualTranslationError(
                 f"delivery của segment {segment_id} không hợp lệ: {delivery!r}."
             )
@@ -320,11 +320,11 @@ def _validate_issues(issues: Any, valid_ids: set[int]) -> list[dict[str, Any]]:
             )
         severity = issue.get("severity", "high")
         category = issue.get("category", "uncertainty")
-        if severity not in ALLOWED_ISSUE_SEVERITIES:
+        if not isinstance(severity, str) or severity not in ALLOWED_ISSUE_SEVERITIES:
             raise ManualTranslationError(
                 f"severity của QC issue {index} phải là critical hoặc high."
             )
-        if category not in ALLOWED_ISSUE_CATEGORIES:
+        if not isinstance(category, str) or category not in ALLOWED_ISSUE_CATEGORIES:
             raise ManualTranslationError(f"category của QC issue {index} không hợp lệ.")
         item: dict[str, Any] = {
             "segment_id": segment_id,
