@@ -371,6 +371,15 @@ class ProjectPipelineService:
         original_audio_mode: str,
     ) -> bool:
         manager.refresh()
+        # Context is an optional dependency for a manually reviewed translation.
+        # Check this before requiring the context stage's own status to be completed.
+        if stage == "context" and manager._translation_complete():
+            try:
+                manual_translation = read_json(manager.paths.translated_json)
+                if manual_translation.get("translation_source") == "manual":
+                    return True
+            except (OSError, ValueError):
+                pass
         if manager.state["stages"].get(stage, {}).get("status") != "completed":
             return False
 
