@@ -60,7 +60,7 @@ class FakeTranslationClient:
     def __init__(self, api_key: str, model: str) -> None:
         self.calls = 0
 
-    def generate_json(self, prompt: str, system_instruction: str, cancel_event=None, max_output_tokens=None):
+    def generate_json(self, prompt: str, system_instruction: str, cancel_event=None, max_output_tokens=None, debug_path=None, expected_root_key=None):
         self.calls += 1
         translated = [
             {
@@ -122,7 +122,7 @@ class FakeRecoverableTranslationClient:
             },
         ]
 
-    def generate_json(self, prompt: str, system_instruction: str, cancel_event=None, max_output_tokens=None):
+    def generate_json(self, prompt: str, system_instruction: str, cancel_event=None, max_output_tokens=None, debug_path=None, expected_root_key=None):
         if "TASK: TRANSLATE THE CURRENT FILM DIALOGUE BATCH" in prompt:
             self.translation_calls += 1
             return {"segments": self.translated}
