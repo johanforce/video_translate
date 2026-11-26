@@ -163,6 +163,10 @@ class FilmTranslationService:
                     system_prompt,
                     cancel_event=cancel_event,
                     max_output_tokens=max(4096, min(8192, batch_size * 64)),
+                    debug_path=paths.translated_json.with_name(
+                        f"{paths.translated_json.stem}.batch-{batch_index + 1:03d}.translation.raw.txt"
+                    ),
+                    expected_root_key="segments",
                 )
                 translated_batch = self._validate_segments(
                     current,
@@ -204,6 +208,10 @@ class FilmTranslationService:
                     system_prompt,
                     cancel_event=cancel_event,
                     max_output_tokens=max(2048, min(4096, batch_size * 24)),
+                    debug_path=paths.translated_json.with_name(
+                        f"{paths.translated_json.stem}.batch-{batch_index + 1:03d}.qc.raw.txt"
+                    ),
+                    expected_root_key="corrections",
                 )
                 checked_batch, issues = self._apply_qc_response(
                     current,
