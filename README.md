@@ -104,6 +104,13 @@ This is a structural/completeness validation and records the user's manual revie
 
 Gemini remains optional for this path. The existing Gemini context/translation workflow is unchanged for projects that use it.
 
+## Gemini JSON diagnostics
+
+If Gemini returns malformed JSON or an unexpected root type during film translation/QC, the application saves the exact model output beside the translation project files. Translation responses use filenames ending in `.batch-001.translation.raw.txt`; QC responses end in `.batch-001.qc.raw.txt`. The batch number changes for each batch. If the automatic repair response is also invalid, it is saved as a sibling file ending in `.repair.raw.txt`.
+
+The error message reports the received JSON root type (for example `list`, `str`, or `int`) and the path to the saved response. When Gemini returns a JSON array instead of the requested object, the client safely wraps it under the known collection key (`segments` for translation or `corrections` for QC) and the normal segment/QC validation still runs. Other unexpected root types are not silently converted.
+
+
 ## Requirements
 
 - Python 3.10+.
