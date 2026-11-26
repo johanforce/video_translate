@@ -1201,6 +1201,13 @@ class MainWindow(QMainWindow):
 
     def _on_voices_loaded(self, voices: list[dict]) -> None:
         selected = str(self.voice_combo.currentData() or self.settings.vieneu_voice)
+        # Preserve projects/settings that still store an old preset alias.
+        alias_to_id = {
+            str(alias): str(voice["id"])
+            for voice in voices
+            for alias in voice.get("aliases", [])
+        }
+        selected = alias_to_id.get(selected, selected)
         self.voice_combo.clear()
         for voice in voices:
             label = voice["name"]
