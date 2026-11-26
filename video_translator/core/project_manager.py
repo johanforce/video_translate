@@ -161,7 +161,21 @@ class ProjectManager:
 
     def next_incomplete_stage(self) -> str | None:
         self.refresh()
+        manual_translation_ready = False
+        try:
+            translation = read_json(self.paths.translated_json)
+            manual_translation_ready = (
+                translation.get("translation_source") == "manual"
+                and self._translation_complete()
+            )
+        except (OSError, ValueError):
+            manual_translation_ready = False
+
         for stage in self.STAGES:
+            # A validated manual translation does not depend on Gemini context.
+            # Keep the context stage visibly uncompleted, but don't block resume.
+            if stage == "context" and manual_translation_ready:
+                continue
             if self.state["stages"].get(stage, {}).get("status") != "completed":
                 return stage
         return None
