@@ -1808,7 +1808,7 @@ class MainWindow(QMainWindow):
         self.batch_start_button.setEnabled(
             not self._busy
             and bool(self.batch_urls_input.toPlainText().strip())
-            and bool(self.batch_keys_input.toPlainText().strip())
+            and bool(self.batch_keys_input.text().strip())
         )
 
     def _append_log(self, message: str) -> None:
