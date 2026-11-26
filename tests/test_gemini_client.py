@@ -23,9 +23,18 @@ class GeminiClientTests(unittest.TestCase):
             {"film_profile": {"genre": "Drama"}},
         )
 
-    def test_rejects_non_object_json(self) -> None:
-        with self.assertRaises(GeminiClientError):
+    def test_rejects_non_object_json_with_root_type(self) -> None:
+        with self.assertRaisesRegex(GeminiClientError, "list"):
             GeminiJsonClient._parse_json("[]")
+
+    def test_wraps_root_array_when_expected_collection_is_known(self) -> None:
+        self.assertEqual(
+            GeminiJsonClient._parse_json(
+                '[[1, "Xin chào"]]',
+                expected_root_key="segments",
+            ),
+            {"segments": [[1, "Xin chào"]]},
+        )
 
     def test_invalid_response_is_saved_with_finish_reason(self) -> None:
         raw_response = '{"characters": [\n  {"name": "A"}'
@@ -99,12 +108,58 @@ class GeminiClientTests(unittest.TestCase):
 
             self.assertEqual(result, {"characters": [{"name": "A"}]})
             self.assertEqual(len(models.calls), 2)
-            self.assertIn("Repair only the JSON syntax", models.calls[1]["contents"])
+            self.assertIn("Repair it and return the complete corrected object", models.calls[1]["contents"])
             self.assertTrue(debug_path.is_file())
             self.assertEqual(
                 debug_path.with_suffix(".repaired.json").read_text(encoding="utf-8"),
                 '{\n  "characters": [\n    {\n      "name": "A"\n    }\n  ]\n}',
             )
+
+    def test_invalid_root_and_repair_responses_are_both_saved(self) -> None:
+        first = SimpleNamespace(
+            text="42",
+            candidates=[SimpleNamespace(finish_reason="STOP")],
+            usage_metadata=SimpleNamespace(total_token_count=200),
+        )
+        repaired = SimpleNamespace(
+            text='"still not an object"',
+            candidates=[SimpleNamespace(finish_reason="STOP")],
+            usage_metadata=SimpleNamespace(total_token_count=80),
+        )
+
+        class FakeModels:
+            def __init__(self):
+                self.responses = [first, repaired]
+
+            def generate_content(self, **kwargs):
+                return self.responses.pop(0)
+
+        client = GeminiJsonClient.__new__(GeminiJsonClient)
+        client.model = "test-model"
+        client._types = SimpleNamespace(
+            GenerateContentConfig=lambda **kwargs: kwargs
+        )
+        client._client = SimpleNamespace(models=FakeModels())
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            debug_path = Path(temp_dir) / "batch-01.translation.raw.txt"
+            with self.assertRaisesRegex(GeminiClientError, "int") as raised:
+                client.generate_json(
+                    "prompt",
+                    "system",
+                    debug_path=debug_path,
+                    expected_root_key="segments",
+                )
+
+            repair_path = debug_path.with_suffix(".repair.raw.txt")
+            self.assertEqual(debug_path.read_text(encoding="utf-8"), "42")
+            self.assertEqual(
+                repair_path.read_text(encoding="utf-8"),
+                '"still not an object"',
+            )
+            self.assertIn(str(debug_path), str(raised.exception))
+            self.assertIn(str(repair_path), str(raised.exception))
+            self.assertIn("str", str(raised.exception))
 
     def test_json_repair_max_tokens_is_reported_as_output_limit(self) -> None:
         first = SimpleNamespace(
