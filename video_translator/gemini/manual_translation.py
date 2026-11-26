@@ -41,6 +41,20 @@ def create_manual_translation_template(
 ) -> int:
     """Create an editable JSON template tied to the exact source transcript."""
     paths = MovieProjectPaths.from_transcript(transcript_path)
+    destination = Path(destination_path).expanduser().resolve()
+    protected_paths = {
+        paths.transcript_json,
+        paths.context_json,
+        paths.translated_json,
+        paths.translated_srt,
+        paths.quality_json,
+        paths.tts_manifest,
+    }
+    if destination in protected_paths:
+        raise ManualTranslationError(
+            "Không thể ghi file mẫu đè lên transcript hoặc artifact của project."
+        )
+
     transcript = _load_transcript(paths.transcript_json)
     source_segments = _validated_source_segments(transcript)
 
@@ -76,7 +90,7 @@ def create_manual_translation_template(
             for item in source_segments
         ],
     }
-    write_json_atomic(Path(destination_path), template)
+    write_json_atomic(destination, template)
     return len(source_segments)
 
 
