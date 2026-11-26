@@ -29,6 +29,11 @@ from video_translator.core.models import DownloadProgress, TranscriptionProgress
 from video_translator.core.project_manager import ProjectManager
 from video_translator.core.project_registry import ProjectRegistry
 from video_translator.gemini.project_paths import MovieProjectPaths
+from video_translator.gemini.manual_translation import (
+    ManualTranslationError,
+    create_manual_translation_template,
+    import_manual_translation,
+)
 from video_translator.ui.download_worker import DownloadWorker
 from video_translator.ui.gemini_worker import GeminiWorker
 from video_translator.ui.pipeline_worker import PipelineWorker
@@ -353,6 +358,30 @@ class MainWindow(QMainWindow):
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #9CA3AF;")
         layout.addWidget(hint)
+
+        manual_title = QLabel("DỊCH THỦ CÔNG (KHÔNG CẦN GEMINI API)")
+        manual_title.setObjectName("sectionTitle")
+        layout.addWidget(manual_title)
+        manual_hint = QLabel(
+            "Xuất một file JSON chứa ID và lời thoại gốc, điền bản dịch rồi nhập lại. "
+            "Ứng dụng sẽ kiểm tra transcript có đúng project, đủ ID, bản dịch, nhãn giọng "
+            "và xác nhận QC trước khi hoàn tất công đoạn Translation."
+        )
+        manual_hint.setWordWrap(True)
+        manual_hint.setStyleSheet("color: #9CA3AF;")
+        layout.addWidget(manual_hint)
+
+        manual_buttons = QHBoxLayout()
+        self.manual_template_button = QPushButton("1. Xuất file mẫu JSON")
+        self.manual_template_button.clicked.connect(self._export_manual_template)
+        self.manual_import_button = QPushButton("2. Nhập bản dịch & xác nhận QC")
+        self.manual_import_button.setObjectName("primaryButton")
+        self.manual_import_button.clicked.connect(self._import_manual_translation)
+        manual_buttons.addWidget(self.manual_template_button)
+        manual_buttons.addWidget(self.manual_import_button)
+        manual_buttons.addStretch(1)
+        layout.addLayout(manual_buttons)
+
         layout.addStretch(1)
         self.tabs.addTab(tab, "2 · Gemini Dịch phim")
 
@@ -669,6 +698,99 @@ class MainWindow(QMainWindow):
         self._connect_common_worker(self.worker)
         self.worker.succeeded.connect(self._on_transcription_success)
         self.worker.start()
+
+    def _export_manual_template(self) -> None:
+        transcript_path = Path(self.transcript_input.text().strip()).expanduser()
+        if not transcript_path.is_file():
+            QMessageBox.warning(
+                self, "Thiếu transcript",
+                "Hãy chọn transcript JSON đã hoàn tất ở tab Video & Transcript.",
+            )
+            return
+
+        default_path = transcript_path.parent / (
+            transcript_path.name.removesuffix(".transcript.json")
+            + ".manual-translation.json"
+        )
+        selected, _ = QFileDialog.getSaveFileName(
+            self,
+            "Xuất mẫu dịch thủ công",
+            str(default_path),
+            "Manual translation JSON (*.json)",
+        )
+        if not selected:
+            return
+        destination = Path(selected).expanduser()
+        if destination.suffix.lower() != ".json":
+            destination = destination.with_suffix(".json")
+        try:
+            count = create_manual_translation_template(transcript_path, destination)
+        except (ManualTranslationError, OSError, ValueError) as exc:
+            QMessageBox.critical(self, "Không thể xuất file mẫu", str(exc))
+            self._append_log(f"LỖI xuất mẫu dịch thủ công: {exc}")
+            return
+
+        self._append_log(f"Đã xuất mẫu dịch thủ công: {destination} ({count} segments)")
+        QMessageBox.information(
+            self,
+            "Đã tạo file mẫu",
+            f"Đã tạo file JSON gồm {count} đoạn thoại:\n{destination}\n\n"
+            "Mở file bằng VS Code hoặc Notepad++, điền translated_text cho từng đoạn, "
+            "đặt reviewed = true sau khi kiểm tra từng câu, rồi đặt "
+            "quality_control.completed = true sau khi rà soát toàn bộ.",
+        )
+
+    def _import_manual_translation(self) -> None:
+        transcript_path = Path(self.transcript_input.text().strip()).expanduser()
+        if not transcript_path.is_file():
+            QMessageBox.warning(
+                self, "Thiếu transcript",
+                "Hãy chọn đúng transcript JSON dùng để xuất mẫu.",
+            )
+            return
+
+        selected, _ = QFileDialog.getOpenFileName(
+            self,
+            "Nhập bản dịch thủ công",
+            str(transcript_path.parent),
+            "Manual translation JSON (*.json);;All files (*)",
+        )
+        if not selected:
+            return
+
+        try:
+            json_path, srt_path, quality_path, count = import_manual_translation(
+                transcript_path,
+                Path(selected),
+            )
+            self.project_manager = ProjectManager(transcript_path)
+            self.translation_input.setText(str(json_path))
+            self.render_translation_input.setText(str(json_path))
+            self._complete_stage("translation", translation_path=str(json_path), source="manual")
+        except (ManualTranslationError, OSError, ValueError, TypeError) as exc:
+            self._append_log(f"LỖI nhập bản dịch thủ công: {exc}")
+            QMessageBox.critical(
+                self,
+                "File dịch thủ công chưa đạt yêu cầu",
+                f"{exc}\n\nChưa xác nhận công đoạn Translation. "
+                "Sửa file JSON rồi nhập lại.",
+            )
+            return
+
+        self.status_label.setText(f"Đã xác nhận dịch thủ công: {count} đoạn.")
+        self._append_log(f"Manual Vietnamese JSON: {json_path}")
+        self._append_log(f"Vietnamese SRT: {srt_path}")
+        self._append_log(f"Manual QC report: {quality_path}")
+        self._refresh_project()
+        self._update_action_states()
+        QMessageBox.information(
+            self,
+            "Đã xác nhận công đoạn dịch",
+            f"Đã kiểm tra và nhập thành công {count} đoạn.\n\n"
+            f"JSON: {json_path}\nSRT: {srt_path}\nQC: {quality_path}\n\n"
+            "Project Manager đã đánh dấu Translation = completed. "
+            "Bạn có thể chuyển sang tab VieNeu Thuyết minh.",
+        )
 
     def _start_gemini(self, mode: str) -> None:
         transcript_path = Path(self.transcript_input.text().strip()).expanduser()
@@ -1172,6 +1294,8 @@ class MainWindow(QMainWindow):
             self.translation_batch_spin,
             self.context_button,
             self.translate_button,
+            self.manual_template_button,
+            self.manual_import_button,
             self.translation_input,
             self.translation_browse_button,
             self.voice_combo,
@@ -1503,6 +1627,8 @@ class MainWindow(QMainWindow):
         )
         self.context_button.setEnabled(not self._busy and has_transcript)
         self.translate_button.setEnabled(not self._busy and has_transcript and has_context)
+        self.manual_template_button.setEnabled(not self._busy and has_transcript)
+        self.manual_import_button.setEnabled(not self._busy and has_transcript)
         self.tts_button.setEnabled(
             not self._busy and translated_path.is_file() and bool(self.voice_combo.currentData())
         )
