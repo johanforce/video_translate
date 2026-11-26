@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 
 from video_translator.config.settings import AppSettings
 from video_translator.core.models import DownloadProgress, TranscriptionProgress
+from video_translator.download.url_validator import validate_video_url
 from video_translator.core.project_manager import ProjectManager
 from video_translator.core.project_registry import ProjectRegistry
 from video_translator.gemini.project_paths import MovieProjectPaths
@@ -34,6 +35,7 @@ from video_translator.gemini.manual_translation import (
     create_manual_translation_template,
     import_manual_translation,
 )
+from video_translator.ui.batch_pipeline_worker import BatchPipelineWorker
 from video_translator.ui.download_worker import DownloadWorker
 from video_translator.ui.gemini_worker import GeminiWorker
 from video_translator.ui.pipeline_worker import PipelineWorker
@@ -53,6 +55,7 @@ class MainWindow(QMainWindow):
             | TTSWorker
             | RenderWorker
             | PipelineWorker
+            | BatchPipelineWorker
             | None
         ) = None
         self.voice_worker: VoiceListWorker | None = None
@@ -86,6 +89,7 @@ class MainWindow(QMainWindow):
 
         self.tabs = QTabWidget()
         self._build_source_tab()
+        self._build_batch_tab()
         self._build_gemini_tab()
         self._build_vieneu_tab()
         self._build_export_tab()
@@ -299,6 +303,60 @@ class MainWindow(QMainWindow):
         layout.addWidget(hint)
         layout.addStretch(1)
         self.tabs.addTab(tab, "1 · Video & Transcript")
+
+    def _build_batch_tab(self) -> None:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(10)
+
+        title = QLabel("CHẠY HÀNG LOẠT VIDEO")
+        title.setObjectName("sectionTitle")
+        layout.addWidget(title)
+
+        intro = QLabel(
+            "Dán mỗi URL trên một dòng. Nhập các Gemini API key, mỗi key một dòng. "
+            "Tool sẽ tự tải, nhận diện, phân tích/dịch/QC, tạo giọng VieNeu và render MP4 "
+            "cho từng URL theo thứ tự."
+        )
+        intro.setWordWrap(True)
+        intro.setStyleSheet("color: #9CA3AF;")
+        layout.addWidget(intro)
+
+        layout.addWidget(QLabel("DANH SÁCH VIDEO URL"))
+        self.batch_urls_input = QPlainTextEdit()
+        self.batch_urls_input.setPlaceholderText(
+            "https://www.youtube.com/watch?v=...\nhttps://youtu.be/...\nhttps://www.bilibili.com/video/..."
+        )
+        self.batch_urls_input.setMinimumHeight(150)
+        self.batch_urls_input.textChanged.connect(self._update_action_states)
+        layout.addWidget(self.batch_urls_input)
+
+        layout.addWidget(QLabel("DANH SÁCH GEMINI API KEY"))
+        self.batch_keys_input = QPlainTextEdit()
+        self.batch_keys_input.setPlaceholderText(
+            "AIza...key-1\nAIza...key-2\nAIza...key-3"
+        )
+        self.batch_keys_input.setMinimumHeight(105)
+        self.batch_keys_input.textChanged.connect(self._update_action_states)
+        layout.addWidget(self.batch_keys_input)
+
+        retry_hint = QLabel(
+            "Chính sách tự động: mỗi lần lỗi chờ 10 giây rồi thử lại; sau 5 lần lỗi "
+            "liên tiếp với một key sẽ chuyển sang key kế tiếp. Hết key thì dừng toàn bộ "
+            "hàng đợi. Project được lưu checkpoint, nên lần retry không làm lại các bước "
+            "đã hoàn tất. Key chỉ giữ trong RAM và không được ghi vào project/log."
+        )
+        retry_hint.setWordWrap(True)
+        retry_hint.setStyleSheet("color: #9CA3AF;")
+        layout.addWidget(retry_hint)
+
+        self.batch_start_button = QPushButton("Bắt đầu chạy hàng loạt")
+        self.batch_start_button.setObjectName("primaryButton")
+        self.batch_start_button.clicked.connect(self._start_batch_pipeline)
+        layout.addWidget(self.batch_start_button)
+        layout.addStretch(1)
+        self.tabs.addTab(tab, "Chạy hàng loạt")
 
     def _build_gemini_tab(self) -> None:
         tab = QWidget()
