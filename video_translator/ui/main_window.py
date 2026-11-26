@@ -763,6 +763,7 @@ class MainWindow(QMainWindow):
                 transcript_path,
                 Path(selected),
             )
+            ProjectRegistry().register(transcript_path)
             self.project_manager = ProjectManager(transcript_path)
             self.translation_input.setText(str(json_path))
             self.render_translation_input.setText(str(json_path))
