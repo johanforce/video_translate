@@ -79,7 +79,7 @@ class BatchPipelineService:
         for url_index, url in enumerate(clean_urls):
             self._check_cancel(cancel_event)
             failures_with_key = 0
-            progress_callback = self._url_progress(url_index, total_urls, url)
+            progress_callback = self._url_progress(url_index, total_urls)
 
             while True:
                 self._check_cancel(cancel_event)
@@ -126,9 +126,10 @@ class BatchPipelineService:
                     failures_with_key += 1
                     if failures_with_key >= failures_per_key:
                         if active_key_index + 1 >= len(clean_keys):
+                            safe_error = self._redact_secrets(str(exc), clean_keys)
                             message = (
                                 f"Hết Gemini API key sau {failures_per_key} lần lỗi "
-                                f"với URL: {url}. Lỗi cuối: {exc}"
+                                f"với URL: {url}. Lỗi cuối: {safe_error}"
                             )
                             self._log("[BATCH DỪNG] " + message)
                             raise BatchApiKeysExhaustedError(message) from exc
@@ -140,8 +141,10 @@ class BatchPipelineService:
                             "project sẽ tiếp tục từ checkpoint."
                         )
                     else:
+                        safe_error = self._redact_secrets(str(exc), clean_keys)
                         self._log(
-                            f"[BATCH] Lỗi lần {failures_with_key}/{failures_per_key}: {exc}"
+                            f"[BATCH] Lỗi lần {failures_with_key}/{failures_per_key}: "
+                            f"{safe_error}"
                         )
 
                     self._log(
@@ -161,7 +164,6 @@ class BatchPipelineService:
         self,
         url_index: int,
         total_urls: int,
-        url: str,
     ) -> ProgressCallback:
         def callback(progress: TranscriptionProgress) -> None:
             if progress.percent is None:
@@ -185,6 +187,14 @@ class BatchPipelineService:
     def _log(self, message: str) -> None:
         if self.log_callback:
             self.log_callback(message)
+
+    @staticmethod
+    def _redact_secrets(message: str, api_keys: list[str]) -> str:
+        redacted = message
+        for api_key in api_keys:
+            if api_key:
+                redacted = redacted.replace(api_key, "[REDACTED]")
+        return redacted
 
     @staticmethod
     def _check_cancel(cancel_event: threading.Event) -> None:
