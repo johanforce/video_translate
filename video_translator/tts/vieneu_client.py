@@ -63,11 +63,25 @@ class VieNeuClient:
         for name, info in sorted(presets.items(), key=sort_key):
             if not isinstance(info, dict):
                 continue
+            raw_aliases = info.get("aliases", [])
+            aliases = (
+                [str(alias).strip() for alias in raw_aliases if str(alias).strip()]
+                if isinstance(raw_aliases, (list, tuple))
+                else []
+            )
+            # VieNeu v3 may rename a preset but keep the familiar name as an
+            # alias. Prefer that curated alias in the UI while always storing
+            # the canonical preset ID used by the SDK.
+            display_name = aliases[0] if aliases else str(name)
+            description = str(info.get("description") or "")
+            if display_name != str(name):
+                description = f"{name} · {description}" if description else str(name)
             result.append(
                 {
                     "id": str(name),
-                    "name": str(name),
-                    "description": str(info.get("description") or ""),
+                    "name": display_name,
+                    "aliases": aliases,
+                    "description": description,
                     "gender": str(info.get("gender") or ""),
                     "region": str(info.get("region") or ""),
                     "kind": "preset",
@@ -88,9 +102,21 @@ class VieNeuClient:
         requested = (requested_voice or "").strip()
         if requested in available:
             return requested
+        # Resolve renamed SDK presets from the aliases shipped in the voice
+        # catalogue (e.g. "Minh Quân Pro" -> canonical ID "Hải Đăng").
+        alias_to_id = {
+            str(alias): str(item["id"])
+            for item in voices
+            for alias in item.get("aliases", [])
+            if str(alias).strip()
+        }
+        if requested in alias_to_id:
+            return alias_to_id[requested]
         fallback = (fallback_voice or "").strip()
         if fallback in available:
             return fallback
+        if fallback in alias_to_id:
+            return alias_to_id[fallback]
         if voices:
             return str(voices[0]["id"])
         raise VieNeuError("VieNeu SDK không có preset voice nào khả dụng.")
