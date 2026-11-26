@@ -63,12 +63,53 @@ Python desktop application for contextual Vietnamese film translation and dubbin
 - Gemini model selection is not part of the resumable context/translation cache signature. Completed chapters and batches remain reusable; the selected model handles only unfinished requests. Completed Gemini stages are not regenerated just because the model changed.
 - Changed transcript/context/translation/voice/render settings invalidate only dependent artifacts, not unrelated earlier stages.
 
+## Manual translation (without Gemini API)
+
+The translation stage can be completed manually when Gemini translation or QC requests are unavailable.
+
+1. Finish Whisper transcription and select the resulting transcript JSON in **1 · Video & Transcript**.
+2. Open **2 · Gemini Dịch phim** and click **1. Xuất file mẫu JSON**.
+3. Open the generated `<movie>.manual-translation.json` in VS Code, Notepad++, or another UTF-8 JSON editor.
+4. For every item in `segments`, keep `id` and `source_text` unchanged, fill `translated_text`, and set `reviewed` to `true` after checking the line. Empty source dialogue must keep an empty translation.
+5. Set `quality_control.completed` to `true` only after reviewing the complete translation. Add optional unresolved material issues to `quality_control.issues`.
+6. Back in the application, click **2. Nhập bản dịch & xác nhận QC** and select the edited JSON file.
+
+Example segment:
+
+```json
+{
+  "id": 12,
+  "source_text": "Where are you going?",
+  "translated_text": "Anh định đi đâu?",
+  "emotion": "curious",
+  "delivery": "normal",
+  "reviewed": true
+}
+```
+
+Required top-level review confirmation:
+
+```json
+{
+  "quality_control": {
+    "completed": true,
+    "issues": []
+  }
+}
+```
+
+The importer checks the transcript fingerprint, segment IDs (including duplicates/missing/extra rows), unchanged source text, non-empty translations, per-line review flags, emotion/delivery values, and final QC confirmation. It then creates the same `.vi.translation.json`, `.vi.srt`, and `.vi.quality.json` artifacts used by the VieNeu and render stages. The translation stage is marked completed and the full-project resume path skips Gemini context and translation for this reviewed manual import.
+
+This is a structural/completeness validation and records the user's manual review attestation; it does not use an AI model to independently judge translation accuracy. Do not set the review flags to true before you have actually checked the dialogue.
+
+Gemini remains optional for this path. The existing Gemini context/translation workflow is unchanged for projects that use it.
+
 ## Requirements
 
 - Python 3.10+.
 - FFmpeg and ffprobe available on PATH.
 - FFmpeg build with `libass` for hard/burned subtitles.
-- Gemini API key.
+- Gemini API key (only needed for Gemini context/translation; not required for manual import).
 - VieNeu SDK package (`vieneu`) and eSpeak NG.
 - Internet access for source download, first Whisper model download, first VieNeu model download and Gemini requests. VieNeu synthesis itself is local.
 
