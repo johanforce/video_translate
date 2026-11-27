@@ -22,7 +22,7 @@ _SUPPORTED_HOSTS = {
     "dailymotion.com",
     "www.dailymotion.com",
     "m.dailymotion.com",
-    " dai.ly".strip(),
+    "dai.ly",
 }
 
 
