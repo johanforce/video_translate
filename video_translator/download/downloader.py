@@ -220,6 +220,14 @@ class VideoDownloader:
     @staticmethod
     def _friendly_download_error(message: str) -> str:
         lowered = message.lower()
+        if "impersonation" in lowered or "impersonate targets are available" in lowered:
+            return (
+                "Dailymotion yêu cầu thư viện giả lập trình duyệt nhưng môi trường "
+                "chưa có dependency phù hợp (curl-cffi). Hãy chạy trong đúng "
+                "Python environment của ứng dụng: "
+                'python -m pip install -U "yt-dlp[default,curl-cffi]" '
+                "sau đó khởi động lại ứng dụng."
+            )
         if "private video" in lowered or "private" in lowered:
             return "Video riêng tư hoặc không có quyền truy cập."
         if "unsupported url" in lowered:
