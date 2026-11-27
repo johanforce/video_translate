@@ -130,6 +130,7 @@ API keys are masked in the input field and are held in memory only; they are not
 
 - Python 3.10+.
 - FFmpeg and ffprobe available on PATH.
+- `yt-dlp[default,curl-cffi]` is installed from `requirements.txt`; Dailymotion may require browser impersonation support.
 - FFmpeg build with `libass` for hard/burned subtitles.
 - Gemini API key (only needed for Gemini context/translation; not required for manual import).
 - VieNeu SDK package (`vieneu`) and eSpeak NG.
@@ -142,6 +143,8 @@ py -3.11 -m venv .venv
 .venv`Scripts`Activate.ps1
 python -m pip install --upgrade pip
 pip install -r requirements.txt
+# If updating an existing environment after the Dailymotion impersonation error:
+python -m pip install -U "yt-dlp[default,curl-cffi]"
 Copy-Item .env.example .env
 python main.py
 ```
@@ -154,6 +157,9 @@ Edit `.env` and set `GEMINI_API_KEY`. VieNeu local SDK does not need an API key.
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
+pip install -r requirements.txt
+# If updating an existing environment after the Dailymotion impersonation error:
+python -m pip install -U "yt-dlp[default,curl-cffi]"
 cp .env.example .env
 python main.py
 ```
