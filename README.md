@@ -124,7 +124,7 @@ The **Chạy hàng loạt** tab accepts multiple YouTube/Bilibili URLs (one URL 
 
 The batch runner retries a failed URL after 10 seconds. After 5 consecutive pipeline failures with the active key, it switches to the next supplied key and retries the same URL. If every supplied key has exhausted its retry allowance, it stops the entire queue and reports the URL and final error. Each URL uses the normal project checkpoint/cache, so a retry resumes completed stages rather than starting those stages over. URLs are processed in the order entered.
 
-API keys are masked in the input field and are held in memory only; they are not saved in project files or written to the batch log. The batch runner uses the Whisper, Gemini model/batch size, VieNeu voice/speed, subtitle, audio-mix, and output-folder choices selected in the other tabs. The queue itself is not persisted, so re-enter the URL list to start a new batch after closing the application; already completed project stages remain reusable.
+API keys are masked in the input field and are held in memory only; they are not saved in project files or written to the batch log. The batch tab includes its own VieNeu voice selector, populated from the local SDK catalogue; the selected voice is used for every URL in that queue. Whisper, Gemini model/batch size, VieNeu speed, subtitle, audio-mix, and output-folder choices use the settings selected in the other tabs. The queue itself is not persisted, so re-enter the URL list to start a new batch after closing the application; already completed project stages remain reusable.
 
 ## Requirements
 
