@@ -13,6 +13,8 @@ from video_translator.core.batch_pipeline_service import (
 class FakePipeline:
     def __init__(self, factory, **_kwargs):
         self.factory = factory
+        self.pipeline_arguments = _kwargs
+        self.factory.pipeline_arguments.append(_kwargs)
 
     def run(self, **kwargs):
         self.factory.calls.append(kwargs["gemini_api_key"])
@@ -26,6 +28,7 @@ class FakeFactory:
     def __init__(self, errors=None):
         self.errors = list(errors or [])
         self.calls = []
+        self.pipeline_arguments = []
 
     def __call__(self, **kwargs):
         return FakePipeline(self, **kwargs)
@@ -52,6 +55,20 @@ class BatchPipelineServiceTests(unittest.TestCase):
         self.assertEqual(factory.calls, ["key-one", "key-one", "key-one"])
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["video"], Path("/output/final.mp4"))
+
+    def test_selected_voice_is_used_for_every_url_in_batch(self):
+        factory = FakeFactory()
+
+        self._run(
+            factory,
+            urls=["https://youtu.be/abc123", "https://youtu.be/def456"],
+            voice_id="Hải Đăng",
+        )
+
+        self.assertEqual(
+            [arguments["voice_id"] for arguments in factory.pipeline_arguments],
+            ["Hải Đăng", "Hải Đăng"],
+        )
 
     def test_rotates_key_after_five_failures_and_resumes_same_url(self):
         factory = FakeFactory(["failure"] * 5)
