@@ -5,7 +5,7 @@ Python desktop application for contextual Vietnamese film translation and dubbin
 ## Current release: v0.7
 
 ### v0.1 — Download
-- YouTube and Bilibili through yt-dlp.
+- YouTube, Bilibili and Dailymotion through yt-dlp.
 - MP4 output, prefer source streams at or below 1080p.
 - FFmpeg merges/remuxes video and audio. Lower-resolution sources are not upscaled.
 
@@ -113,7 +113,7 @@ The error message reports the received JSON root type (for example `list`, `str`
 
 ## Automated batch processing
 
-The **Chạy hàng loạt** tab accepts multiple YouTube/Bilibili URLs (one URL per line) and multiple Gemini API keys (comma- or semicolon-separated). It processes URLs sequentially through the existing end-to-end pipeline:
+The **Chạy hàng loạt** tab accepts multiple YouTube/Bilibili/Dailymotion URLs (one URL per line) and multiple Gemini API keys (comma- or semicolon-separated). It processes URLs sequentially through the existing end-to-end pipeline:
 
 1. Download the source video as MP4.
 2. Transcribe speech with Whisper.
