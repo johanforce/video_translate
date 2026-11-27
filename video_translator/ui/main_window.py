@@ -1384,7 +1384,7 @@ class MainWindow(QMainWindow):
             for alias in voice.get("aliases", [])
         }
 
-        def populate_voice_combo(combo: QComboBox, preferred_voice: str) -> None:
+        def populate_voice_combo(combo: QComboBox, preferred_voice: str) -> int:
             preferred_voice = alias_to_id.get(preferred_voice, preferred_voice)
             combo.clear()
             for voice in voices:
