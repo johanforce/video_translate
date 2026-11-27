@@ -341,6 +341,15 @@ class MainWindow(QMainWindow):
         self.batch_keys_input.textChanged.connect(self._update_action_states)
         layout.addWidget(self.batch_keys_input)
 
+        layout.addWidget(QLabel("GIỌNG ĐỌC CHO TOÀN BỘ HÀNG ĐỢI"))
+        self.batch_voice_combo = QComboBox()
+        self.batch_voice_combo.setMinimumWidth(300)
+        self.batch_voice_combo.setPlaceholderText("Đang tải danh sách giọng VieNeu SDK...")
+        self.batch_voice_combo.setToolTip(
+            "Giọng này được dùng cho tất cả video trong hàng đợi chạy hàng loạt."
+        )
+        layout.addWidget(self.batch_voice_combo)
+
         retry_hint = QLabel(
             "Chính sách tự động: mỗi lần lỗi chờ 10 giây rồi thử lại; sau 5 lần lỗi "
             "liên tiếp với một key sẽ chuyển sang key kế tiếp. Hết key thì dừng toàn bộ "
@@ -1024,7 +1033,7 @@ class MainWindow(QMainWindow):
         source_language = self.language_combo.currentData()
         if source_language == "auto":
             source_language = None
-        selected_voice = self.voice_combo.currentData()
+        selected_voice = self.batch_voice_combo.currentData()
         voice_id = str(selected_voice) if selected_voice else self.settings.vieneu_voice
 
         answer = QMessageBox.question(
@@ -1369,34 +1378,47 @@ class MainWindow(QMainWindow):
         )
 
     def _on_voices_loaded(self, voices: list[dict]) -> None:
-        selected = str(self.voice_combo.currentData() or self.settings.vieneu_voice)
-        # Preserve projects/settings that still store an old preset alias.
         alias_to_id = {
             str(alias): str(voice["id"])
             for voice in voices
             for alias in voice.get("aliases", [])
         }
-        selected = alias_to_id.get(selected, selected)
-        self.voice_combo.clear()
-        for voice in voices:
-            label = voice["name"]
-            description = voice.get("description", "")
-            if description:
-                label = f"{label} — {description}"
-            self.voice_combo.addItem(label, voice["id"])
-        selected_index = self.voice_combo.findData(selected)
+
+        def populate_voice_combo(combo: QComboBox, preferred_voice: str) -> None:
+            preferred_voice = alias_to_id.get(preferred_voice, preferred_voice)
+            combo.clear()
+            for voice in voices:
+                label = voice["name"]
+                description = voice.get("description", "")
+                if description:
+                    label = f"{label} — {description}"
+                combo.addItem(label, voice["id"])
+            selected_index = combo.findData(preferred_voice)
+            if selected_index < 0 and voices:
+                selected_index = combo.findData(self.settings.vieneu_voice)
+                if selected_index < 0:
+                    selected_index = 0
+            if selected_index >= 0:
+                combo.setCurrentIndex(selected_index)
+            return selected_index
+
+        selected_voice = str(
+            self.voice_combo.currentData() or self.settings.vieneu_voice
+        )
+        batch_selected_voice = str(
+            self.batch_voice_combo.currentData()
+            or self.voice_combo.currentData()
+            or self.settings.vieneu_voice
+        )
+        selected_index = populate_voice_combo(self.voice_combo, selected_voice)
+        batch_selected_index = populate_voice_combo(
+            self.batch_voice_combo,
+            batch_selected_voice,
+        )
         if selected_index < 0 and voices:
-            fallback = self.settings.vieneu_voice
-            selected_index = self.voice_combo.findData(fallback)
-            if selected_index < 0:
-                selected_index = 0
-            fallback_id = self.voice_combo.itemData(selected_index)
-            self._append_log(
-                f"Giọng '{selected}' không có trong VieNeu SDK local; "
-                f"đã chuyển sang preset '{fallback_id}'."
-            )
-        if selected_index >= 0:
-            self.voice_combo.setCurrentIndex(selected_index)
+            self._append_log("Không khôi phục được giọng TTS chính; đã dùng preset đầu tiên.")
+        if batch_selected_index < 0 and voices:
+            self._append_log("Không khôi phục được giọng chạy hàng loạt; đã dùng preset đầu tiên.")
         self._append_log(f"Đã tải {len(voices)} giọng preset VieNeu SDK v3 Turbo.")
         self._update_action_states()
         if not voices:
@@ -1459,6 +1481,7 @@ class MainWindow(QMainWindow):
             self.batch_urls_input,
             self.batch_keys_input,
             self.batch_start_button,
+            self.batch_voice_combo,
             self.output_input,
             self.output_browse_button,
             self.video_input,
