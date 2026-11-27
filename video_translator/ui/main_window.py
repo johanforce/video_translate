@@ -225,7 +225,7 @@ class MainWindow(QMainWindow):
         form.setSpacing(11)
 
         self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("Dán link YouTube hoặc Bilibili...")
+        self.url_input.setPlaceholderText("Dán link YouTube, Bilibili hoặc Dailymotion...")
         self.url_input.textChanged.connect(self._update_action_states)
         form.addRow("Video URL", self.url_input)
 
@@ -326,7 +326,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("DANH SÁCH VIDEO URL"))
         self.batch_urls_input = QPlainTextEdit()
         self.batch_urls_input.setPlaceholderText(
-            "https://www.youtube.com/watch?v=...\nhttps://youtu.be/...\nhttps://www.bilibili.com/video/..."
+            "https://www.youtube.com/watch?v=...\nhttps://youtu.be/...\nhttps://www.bilibili.com/video/...\nhttps://dai.ly/x..."
         )
         self.batch_urls_input.setMinimumHeight(150)
         self.batch_urls_input.textChanged.connect(self._update_action_states)
