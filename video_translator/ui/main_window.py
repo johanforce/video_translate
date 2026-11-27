@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 
 from video_translator.config.settings import AppSettings
 from video_translator.core.models import DownloadProgress, TranscriptionProgress
+from video_translator.download.url_validator import validate_video_url
 from video_translator.core.project_manager import ProjectManager
 from video_translator.core.project_registry import ProjectRegistry
 from video_translator.gemini.project_paths import MovieProjectPaths
@@ -34,6 +35,7 @@ from video_translator.gemini.manual_translation import (
     create_manual_translation_template,
     import_manual_translation,
 )
+from video_translator.ui.batch_pipeline_worker import BatchPipelineWorker
 from video_translator.ui.download_worker import DownloadWorker
 from video_translator.ui.gemini_worker import GeminiWorker
 from video_translator.ui.pipeline_worker import PipelineWorker
@@ -53,6 +55,7 @@ class MainWindow(QMainWindow):
             | TTSWorker
             | RenderWorker
             | PipelineWorker
+            | BatchPipelineWorker
             | None
         ) = None
         self.voice_worker: VoiceListWorker | None = None
@@ -86,6 +89,7 @@ class MainWindow(QMainWindow):
 
         self.tabs = QTabWidget()
         self._build_source_tab()
+        self._build_batch_tab()
         self._build_gemini_tab()
         self._build_vieneu_tab()
         self._build_export_tab()
@@ -299,6 +303,69 @@ class MainWindow(QMainWindow):
         layout.addWidget(hint)
         layout.addStretch(1)
         self.tabs.addTab(tab, "1 · Video & Transcript")
+
+    def _build_batch_tab(self) -> None:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(10)
+
+        title = QLabel("CHẠY HÀNG LOẠT VIDEO")
+        title.setObjectName("sectionTitle")
+        layout.addWidget(title)
+
+        intro = QLabel(
+            "Dán mỗi URL trên một dòng. Nhập danh sách Gemini API key, ngăn cách bằng dấu phẩy hoặc dấu chấm phẩy. "
+            "Tool sẽ tự tải, nhận diện, phân tích/dịch/QC, tạo giọng VieNeu và render MP4 "
+            "cho từng URL theo thứ tự."
+        )
+        intro.setWordWrap(True)
+        intro.setStyleSheet("color: #9CA3AF;")
+        layout.addWidget(intro)
+
+        layout.addWidget(QLabel("DANH SÁCH VIDEO URL"))
+        self.batch_urls_input = QPlainTextEdit()
+        self.batch_urls_input.setPlaceholderText(
+            "https://www.youtube.com/watch?v=...\nhttps://youtu.be/...\nhttps://www.bilibili.com/video/..."
+        )
+        self.batch_urls_input.setMinimumHeight(150)
+        self.batch_urls_input.textChanged.connect(self._update_action_states)
+        layout.addWidget(self.batch_urls_input)
+
+        layout.addWidget(QLabel("DANH SÁCH GEMINI API KEY"))
+        self.batch_keys_input = QLineEdit()
+        self.batch_keys_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.batch_keys_input.setPlaceholderText(
+            "Nhập các key, phân tách bằng dấu phẩy hoặc dấu chấm phẩy"
+        )
+        self.batch_keys_input.textChanged.connect(self._update_action_states)
+        layout.addWidget(self.batch_keys_input)
+
+        layout.addWidget(QLabel("GIỌNG ĐỌC CHO TOÀN BỘ HÀNG ĐỢI"))
+        self.batch_voice_combo = QComboBox()
+        self.batch_voice_combo.setMinimumWidth(300)
+        self.batch_voice_combo.setPlaceholderText("Đang tải danh sách giọng VieNeu SDK...")
+        self.batch_voice_combo.setToolTip(
+            "Giọng này được dùng cho tất cả video trong hàng đợi chạy hàng loạt."
+        )
+        layout.addWidget(self.batch_voice_combo)
+
+        retry_hint = QLabel(
+            "Chính sách tự động: mỗi lần lỗi chờ 10 giây rồi thử lại; sau 5 lần lỗi "
+            "liên tiếp với một key sẽ chuyển sang key kế tiếp. Hết key thì dừng toàn bộ "
+            "hàng đợi. Project được lưu checkpoint, nên lần retry không làm lại các bước "
+            "đã hoàn tất. Key chỉ giữ trong RAM và không được ghi vào project/log."
+        )
+        retry_hint.setWordWrap(True)
+        retry_hint.setStyleSheet("color: #9CA3AF;")
+        layout.addWidget(retry_hint)
+
+        self.batch_start_button = QPushButton("Bắt đầu chạy hàng loạt")
+        self.batch_start_button.setObjectName("primaryButton")
+        self.batch_start_button.clicked.connect(self._start_batch_pipeline)
+        layout.addWidget(self.batch_start_button)
+        layout.addStretch(1)
+        self.tabs.addTab(tab, "Chạy hàng loạt")
 
     def _build_gemini_tab(self) -> None:
         tab = QWidget()
@@ -918,6 +985,117 @@ class MainWindow(QMainWindow):
         self.worker.succeeded.connect(self._on_render_success)
         self.worker.start()
 
+    def _start_batch_pipeline(self) -> None:
+        urls = [
+            line.strip()
+            for line in self.batch_urls_input.toPlainText().splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        raw_keys = (
+            self.batch_keys_input.text()
+            .replace(",", "\n")
+            .replace(";", "\n")
+        )
+        api_keys = list(dict.fromkeys(
+            line.strip()
+            for line in raw_keys.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ))
+
+        if not urls:
+            QMessageBox.warning(self, "Thiếu URL", "Hãy nhập ít nhất một URL video.")
+            return
+        if not api_keys:
+            QMessageBox.warning(self, "Thiếu API key", "Hãy nhập ít nhất một Gemini API key.")
+            return
+
+        normalized_urls: list[str] = []
+        for index, url in enumerate(urls, start=1):
+            try:
+                normalized_urls.append(validate_video_url(url))
+            except Exception as exc:
+                QMessageBox.warning(
+                    self,
+                    "URL không hợp lệ",
+                    f"URL dòng {index} không hợp lệ:\n{url}\n\n{exc}",
+                )
+                return
+
+        output_text = self.output_input.text().strip()
+        if not output_text:
+            QMessageBox.warning(
+                self,
+                "Thiếu thư mục đầu ra",
+                "Hãy chọn thư mục dự án trong tab Video & Transcript.",
+            )
+            return
+
+        source_language = self.language_combo.currentData()
+        if source_language == "auto":
+            source_language = None
+        selected_voice = self.batch_voice_combo.currentData()
+        voice_id = str(selected_voice) if selected_voice else self.settings.vieneu_voice
+
+        answer = QMessageBox.question(
+            self,
+            "Xác nhận chạy hàng loạt",
+            f"Sẽ xử lý {len(normalized_urls)} video theo thứ tự bằng "
+            f"{len(api_keys)} Gemini API key.\n\n"
+            "Khi lỗi: chờ 10 giây rồi retry; sau 5 lần lỗi với một key sẽ chuyển key. "
+            "Nếu hết key, toàn bộ hàng đợi sẽ dừng.\n\n"
+            "API key chỉ được giữ trong bộ nhớ của phiên chạy. Bắt đầu?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        self._begin_task("Đang khởi chạy hàng đợi video...")
+        self._active_stage = None
+        self.worker = BatchPipelineWorker(
+            urls=normalized_urls,
+            api_keys=api_keys,
+            output_dir=Path(output_text).expanduser(),
+            whisper_model=str(self.model_combo.currentData()),
+            source_language=source_language,
+            gemini_model=str(self.gemini_model_combo.currentData()),
+            translation_batch_size=self.translation_batch_spin.value(),
+            voice_id=voice_id,
+            voice_speed=float(self.voice_speed_spin.value()),
+            subtitle_mode=str(self.subtitle_mode_combo.currentData()),
+            original_audio_mode=str(self.original_audio_combo.currentData()),
+        )
+        self._connect_common_worker(self.worker)
+        self.worker.succeeded.connect(self._on_batch_pipeline_success)
+        self.worker.start()
+
+    def _on_batch_pipeline_success(self, results: list[dict[str, object]]) -> None:
+        completed = len(results)
+        self.status_label.setText(f"Chạy hàng loạt hoàn tất: {completed} video.")
+        self._append_log(f"[BATCH] Hoàn tất {completed} video.")
+        summary_lines = []
+        for index, result in enumerate(results, start=1):
+            video_path = str(result.get("video") or "")
+            summary_lines.append(f"{index}. {video_path}")
+        if results:
+            last_result = results[-1]
+            transcript_value = last_result.get("transcript")
+            if transcript_value:
+                transcript = Path(str(transcript_value))
+                if transcript.is_file():
+                    self.transcript_input.setText(str(transcript))
+                    self.project_transcript_input.setText(str(transcript))
+                    self.translation_input.setText(str(last_result.get("translation") or ""))
+                    self.render_translation_input.setText(str(last_result.get("translation") or ""))
+                    self._set_project_source(transcript)
+        self._update_action_states()
+        QMessageBox.information(
+            self,
+            "Chạy hàng loạt hoàn tất",
+            f"Đã tạo thành công {completed} video MP4:\n\n"
+            + "\n".join(summary_lines),
+        )
+
     def _resume_project(self) -> None:
         self._start_full_pipeline()
 
@@ -1200,34 +1378,47 @@ class MainWindow(QMainWindow):
         )
 
     def _on_voices_loaded(self, voices: list[dict]) -> None:
-        selected = str(self.voice_combo.currentData() or self.settings.vieneu_voice)
-        # Preserve projects/settings that still store an old preset alias.
         alias_to_id = {
             str(alias): str(voice["id"])
             for voice in voices
             for alias in voice.get("aliases", [])
         }
-        selected = alias_to_id.get(selected, selected)
-        self.voice_combo.clear()
-        for voice in voices:
-            label = voice["name"]
-            description = voice.get("description", "")
-            if description:
-                label = f"{label} — {description}"
-            self.voice_combo.addItem(label, voice["id"])
-        selected_index = self.voice_combo.findData(selected)
+
+        def populate_voice_combo(combo: QComboBox, preferred_voice: str) -> int:
+            preferred_voice = alias_to_id.get(preferred_voice, preferred_voice)
+            combo.clear()
+            for voice in voices:
+                label = voice["name"]
+                description = voice.get("description", "")
+                if description:
+                    label = f"{label} — {description}"
+                combo.addItem(label, voice["id"])
+            selected_index = combo.findData(preferred_voice)
+            if selected_index < 0 and voices:
+                selected_index = combo.findData(self.settings.vieneu_voice)
+                if selected_index < 0:
+                    selected_index = 0
+            if selected_index >= 0:
+                combo.setCurrentIndex(selected_index)
+            return selected_index
+
+        selected_voice = str(
+            self.voice_combo.currentData() or self.settings.vieneu_voice
+        )
+        batch_selected_voice = str(
+            self.batch_voice_combo.currentData()
+            or self.voice_combo.currentData()
+            or self.settings.vieneu_voice
+        )
+        selected_index = populate_voice_combo(self.voice_combo, selected_voice)
+        batch_selected_index = populate_voice_combo(
+            self.batch_voice_combo,
+            batch_selected_voice,
+        )
         if selected_index < 0 and voices:
-            fallback = self.settings.vieneu_voice
-            selected_index = self.voice_combo.findData(fallback)
-            if selected_index < 0:
-                selected_index = 0
-            fallback_id = self.voice_combo.itemData(selected_index)
-            self._append_log(
-                f"Giọng '{selected}' không có trong VieNeu SDK local; "
-                f"đã chuyển sang preset '{fallback_id}'."
-            )
-        if selected_index >= 0:
-            self.voice_combo.setCurrentIndex(selected_index)
+            self._append_log("Không khôi phục được giọng TTS chính; đã dùng preset đầu tiên.")
+        if batch_selected_index < 0 and voices:
+            self._append_log("Không khôi phục được giọng chạy hàng loạt; đã dùng preset đầu tiên.")
         self._append_log(f"Đã tải {len(voices)} giọng preset VieNeu SDK v3 Turbo.")
         self._update_action_states()
         if not voices:
@@ -1287,6 +1478,10 @@ class MainWindow(QMainWindow):
         self._busy = busy
         for widget in (
             self.url_input,
+            self.batch_urls_input,
+            self.batch_keys_input,
+            self.batch_start_button,
+            self.batch_voice_combo,
             self.output_input,
             self.output_browse_button,
             self.video_input,
@@ -1633,6 +1828,11 @@ class MainWindow(QMainWindow):
             not self._busy and translated_path.is_file() and bool(self.voice_combo.currentData())
         )
         self.render_button.setEnabled(not self._busy and render_path.is_file())
+        self.batch_start_button.setEnabled(
+            not self._busy
+            and bool(self.batch_urls_input.toPlainText().strip())
+            and bool(self.batch_keys_input.text().strip())
+        )
 
     def _append_log(self, message: str) -> None:
         self.log_view.appendPlainText(message)
