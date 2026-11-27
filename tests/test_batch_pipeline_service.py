@@ -14,9 +14,9 @@ class FakePipeline:
     def __init__(self, factory, **_kwargs):
         self.factory = factory
         self.pipeline_arguments = _kwargs
-        self.factory.pipeline_arguments.append(_kwargs)
 
     def run(self, **kwargs):
+        self.factory.run_arguments.append(kwargs)
         self.factory.calls.append(kwargs["gemini_api_key"])
         if self.factory.errors:
             error = self.factory.errors.pop(0)
@@ -28,7 +28,7 @@ class FakeFactory:
     def __init__(self, errors=None):
         self.errors = list(errors or [])
         self.calls = []
-        self.pipeline_arguments = []
+        self.run_arguments = []
 
     def __call__(self, **kwargs):
         return FakePipeline(self, **kwargs)
@@ -66,7 +66,7 @@ class BatchPipelineServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [arguments["voice_id"] for arguments in factory.pipeline_arguments],
+            [arguments["voice_id"] for arguments in factory.run_arguments],
             ["Hải Đăng", "Hải Đăng"],
         )
 
